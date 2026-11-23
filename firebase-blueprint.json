@@ -1,0 +1,350 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "User subscription state, unique short UserID, storage quota, and parental/adult PIN hashes.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "shortUserId": {
+          "type": "string",
+          "description": "Copyable XEROTV UserID sent to developer for subscription activation",
+          "minLength": 6,
+          "maxLength": 24,
+          "pattern": "^XTV-[A-Z0-9]+$"
+        },
+        "downloadTier": {
+          "type": "string",
+          "enum": ["free", "trial_2d", "download_2m", "lifetime_bundle"],
+          "description": "Active download subscription tier"
+        },
+        "downloadExpiresAtMs": {
+          "type": "number",
+          "description": "Epoch milliseconds when download access expires (0 for none)"
+        },
+        "storageTier": {
+          "type": "string",
+          "enum": ["none", "bonus_2gb", "permanent_1tb"],
+          "description": "Active offline vault storage tier"
+        },
+        "storageQuotaBytes": {
+          "type": "number",
+          "description": "Maximum allowed offline vault bytes"
+        },
+        "storageUsedBytes": {
+          "type": "number",
+          "description": "Currently stored offline vault bytes reported by client"
+        },
+        "redeemedCodes": {
+          "type": "array",
+          "description": "List of promo codes already redeemed by this user"
+        },
+        "kidsPinHash": {
+          "type": "string",
+          "description": "SHA-256 hex digest of Kids Mode parental PIN",
+          "maxLength": 128
+        },
+        "adultPinHash": {
+          "type": "string",
+          "description": "SHA-256 hex digest of 18+ Mode secret PIN",
+          "maxLength": 128
+        },
+        "grantedBy": {
+          "type": "string",
+          "description": "Source of last subscription grant",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of account creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "uid",
+        "shortUserId",
+        "downloadTier",
+        "downloadExpiresAtMs",
+        "storageTier",
+        "storageQuotaBytes",
+        "storageUsedBytes",
+        "redeemedCodes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Isolated PII for authenticated user (email, displayName, photoURL).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "createdAt", "updatedAt"]
+    },
+    "UserLookup": {
+      "title": "UserLookup",
+      "description": "Maps copyable shortUserId (XTV-XXXXXXXX) to Firebase UID for admin subscription grants.",
+      "type": "object",
+      "properties": {
+        "shortUserId": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 24,
+          "pattern": "^XTV-[A-Z0-9]+$"
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["shortUserId", "uid", "createdAt"]
+    },
+    "CodeRedemption": {
+      "title": "CodeRedemption",
+      "description": "Immutable receipt preventing repeat redemption of a promo code by the same user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "daysGranted": {
+          "type": "number"
+        },
+        "storageBonusBytes": {
+          "type": "number"
+        },
+        "redeemedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "code", "daysGranted", "storageBonusBytes", "redeemedAt"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Admin-managed promo codes redeemable by users.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "daysGranted": {
+          "type": "number"
+        },
+        "storageBonusBytes": {
+          "type": "number"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["code", "daysGranted", "storageBonusBytes", "active", "createdAt", "updatedAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Server/bootstrapped admin privilege marker.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"]
+        }
+      },
+      "required": ["uid", "role"]
+    },
+    "PublicStats": {
+      "title": "PublicStats",
+      "description": "Honest aggregate counters for registered users and verified subscription earnings.",
+      "type": "object",
+      "properties": {
+        "registeredUsersCount": {
+          "type": "number"
+        },
+        "totalEarningsPesos": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["registeredUsersCount", "totalEarningsPesos", "updatedAt"]
+    },
+    "PresenceHeartbeat": {
+      "title": "PresenceHeartbeat",
+      "description": "Anonymous active viewer session heartbeat for real live online user counts.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["main", "kids", "adult", "christmas"]
+        },
+        "lastSeenAtMs": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "mode", "lastSeenAtMs", "updatedAt"]
+    },
+    "FeedbackReport": {
+      "title": "FeedbackReport",
+      "description": "User feedback, ratings for real popularity calculation, and bug reports.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["feedback", "bug"]
+        },
+        "rating": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 800
+        },
+        "appVersion": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "resolved"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "category", "rating", "title", "message", "appVersion", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "User subscription, storage quota, and mode PIN hashes."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateProfile" },
+      "description": "Isolated user PII profile document."
+    },
+    "/users/{userId}/redemptions/{codeId}": {
+      "schema": { "$ref": "#/entities/CodeRedemption" },
+      "description": "One-time promo code redemption ledger per user."
+    },
+    "/userLookup/{shortUserId}": {
+      "schema": { "$ref": "#/entities/UserLookup" },
+      "description": "Short UserID to UID lookup for admin subscription grants."
+    },
+    "/promoCodes/{codeId}": {
+      "schema": { "$ref": "#/entities/PromoCode" },
+      "description": "Active redeemable promo codes."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Admin role directory."
+    },
+    "/stats/{statId}": {
+      "schema": { "$ref": "#/entities/PublicStats" },
+      "description": "Honest aggregate platform stats (registered count and verified grant earnings)."
+    },
+    "/presence/{sessionId}": {
+      "schema": { "$ref": "#/entities/PresenceHeartbeat" },
+      "description": "Real-time active browser session heartbeats."
+    },
+    "/feedbackReports/{reportId}": {
+      "schema": { "$ref": "#/entities/FeedbackReport" },
+      "description": "User feedback ratings and bug reports."
+    }
+  }
+}

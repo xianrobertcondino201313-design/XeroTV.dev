@@ -1,0 +1,6 @@
+{
+  "name": "XEROTV",
+  "description": "Liquid Glass movie and series streaming platform developed by XIAN IN PRODUCTION with real TMDB catalog sync, themed profile modes, and offline download vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

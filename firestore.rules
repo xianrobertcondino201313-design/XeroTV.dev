@@ -1,0 +1,384 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'xianrobertcondino201313@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUserAccount(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'shortUserId', 'downloadTier', 'downloadExpiresAtMs',
+          'storageTier', 'storageQuotaBytes', 'storageUsedBytes',
+          'redeemedCodes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'shortUserId', 'downloadTier', 'downloadExpiresAtMs',
+          'storageTier', 'storageQuotaBytes', 'storageUsedBytes',
+          'redeemedCodes', 'kidsPinHash', 'adultPinHash', 'grantedBy',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && data.uid == userId && isValidId(data.uid)
+        && data.shortUserId is string && data.shortUserId.size() >= 6 && data.shortUserId.size() <= 24 && data.shortUserId.matches('^XTV-[A-Z0-9]+$')
+        && data.downloadTier in ['free', 'trial_2d', 'download_2m', 'lifetime_bundle']
+        && data.downloadExpiresAtMs is number && data.downloadExpiresAtMs >= 0
+        && data.storageTier in ['none', 'bonus_2gb', 'permanent_1tb']
+        && data.storageQuotaBytes is number && data.storageQuotaBytes >= 0 && data.storageQuotaBytes <= 10995116277760
+        && data.storageUsedBytes is number && data.storageUsedBytes >= 0 && data.storageUsedBytes <= 10995116277760
+        && data.redeemedCodes is list && data.redeemedCodes.size() <= 50
+        && (data.redeemedCodes.size() == 0 || data.redeemedCodes[0] is string)
+        && (!('kidsPinHash' in data) || (data.kidsPinHash is string && data.kidsPinHash.size() <= 128))
+        && (!('adultPinHash' in data) || (data.adultPinHash is string && data.adultPinHash.size() <= 128))
+        && (!('grantedBy' in data) || (data.grantedBy is string && data.grantedBy.size() <= 64))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == userId && isValidId(data.uid)
+        && data.email is string && data.email.size() <= 256
+        && data.displayName is string && data.displayName.size() <= 128
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 512))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserLookup(data, shortId) {
+      return data.keys().hasAll(['shortUserId', 'uid', 'createdAt'])
+        && data.keys().hasOnly(['shortUserId', 'uid', 'createdAt'])
+        && data.shortUserId is string && data.shortUserId == shortId && data.shortUserId.matches('^XTV-[A-Z0-9]+$')
+        && data.uid is string && isValidId(data.uid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRedemption(data, userId, codeId) {
+      return data.keys().hasAll(['uid', 'code', 'daysGranted', 'storageBonusBytes', 'redeemedAt'])
+        && data.keys().hasOnly(['uid', 'code', 'daysGranted', 'storageBonusBytes', 'redeemedAt'])
+        && data.uid is string && data.uid == userId && isValidId(data.uid)
+        && data.code is string && data.code == codeId && codeId.matches('^[A-Z0-9_\\-]+$') && data.code.size() >= 3 && data.code.size() <= 32
+        && data.daysGranted is number && data.daysGranted >= 0 && data.daysGranted <= 3650
+        && data.storageBonusBytes is number && data.storageBonusBytes >= 0 && data.storageBonusBytes <= 1099511627776
+        && data.redeemedAt is timestamp;
+    }
+
+    function isValidPromoCode(data, codeId) {
+      return data.keys().hasAll(['code', 'daysGranted', 'storageBonusBytes', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['code', 'daysGranted', 'storageBonusBytes', 'active', 'createdAt', 'updatedAt'])
+        && data.code is string && data.code == codeId && codeId.matches('^[A-Z0-9_\\-]+$') && data.code.size() >= 3 && data.code.size() <= 32
+        && data.daysGranted is number && data.daysGranted >= 0 && data.daysGranted <= 3650
+        && data.storageBonusBytes is number && data.storageBonusBytes >= 0 && data.storageBonusBytes <= 1099511627776
+        && data.active is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserRedemptionMutation(userId, newCode) {
+      return isValidId(newCode)
+        && newCode.matches('^[A-Z0-9_\\-]+$')
+        && !(newCode in existing().redeemedCodes)
+        && incoming().redeemedCodes.hasAll(existing().redeemedCodes)
+        && incoming().redeemedCodes.size() == existing().redeemedCodes.size() + 1
+        && incoming().grantedBy == 'code:' + newCode
+        && incoming().downloadTier in ['free', 'trial_2d', 'download_2m', 'lifetime_bundle']
+        && incoming().storageTier in ['none', 'bonus_2gb', 'permanent_1tb']
+        && existsAfter(/databases/$(database)/documents/users/$(userId)/redemptions/$(newCode))
+        && (
+          (newCode == 'NEWUSER2026'
+            && incoming().storageQuotaBytes == existing().storageQuotaBytes + 2147483648
+            && incoming().downloadExpiresAtMs <= (
+              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 172900000
+            )
+          )
+          ||
+          (newCode == 'VER-1-0XEROTV'
+            && incoming().storageQuotaBytes == existing().storageQuotaBytes + 5368709120
+            && incoming().downloadExpiresAtMs <= (
+              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 1728100000
+            )
+          )
+          ||
+          (exists(/databases/$(database)/documents/promoCodes/$(newCode))
+            && get(/databases/$(database)/documents/promoCodes/$(newCode)).data.active == true
+            && incoming().storageQuotaBytes == existing().storageQuotaBytes + get(/databases/$(database)/documents/promoCodes/$(newCode)).data.storageBonusBytes
+            && incoming().downloadExpiresAtMs <= (
+              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis())
+              + (get(/databases/$(database)/documents/promoCodes/$(newCode)).data.daysGranted * 86400000) + 120000
+            )
+          )
+        );
+    }
+
+    function isValidPublicStats(data) {
+      return data.keys().hasAll(['registeredUsersCount', 'totalEarningsPesos', 'updatedAt'])
+        && data.keys().hasOnly(['registeredUsersCount', 'totalEarningsPesos', 'updatedAt'])
+        && data.registeredUsersCount is number && data.registeredUsersCount >= 0
+        && data.totalEarningsPesos is number && data.totalEarningsPesos >= 0
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPresence(data, sessionId) {
+      return data.keys().hasAll(['sessionId', 'mode', 'lastSeenAtMs', 'updatedAt'])
+        && data.keys().hasOnly(['sessionId', 'mode', 'lastSeenAtMs', 'updatedAt'])
+        && data.sessionId is string && data.sessionId == sessionId && sessionId.size() >= 6 && sessionId.size() <= 64
+        && data.mode in ['main', 'kids', 'adult', 'christmas']
+        && data.lastSeenAtMs is number && data.lastSeenAtMs > 0
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFeedbackReport(data, reportId) {
+      return data.keys().hasAll(['id', 'category', 'rating', 'title', 'message', 'appVersion', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'category', 'rating', 'title', 'message', 'appVersion', 'status', 'createdAt'])
+        && data.id is string && data.id == reportId && reportId.size() >= 4 && reportId.size() <= 64
+        && data.category in ['feedback', 'bug']
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && data.message is string && data.message.size() >= 4 && data.message.size() <= 800
+        && data.appVersion is string && data.appVersion.size() >= 1 && data.appVersion.size() <= 24
+        && data.status in ['open', 'resolved']
+        && data.createdAt is timestamp;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().downloadTier == 'free'
+        && incoming().downloadExpiresAtMs == 0
+        && incoming().storageTier == 'none'
+        && incoming().storageQuotaBytes == 0
+        && incoming().storageUsedBytes == 0
+        && incoming().redeemedCodes.size() == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/userLookup/$(incoming().shortUserId));
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().shortUserId == existing().shortUserId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Tier 1: Admin subscription grant/revocation
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'downloadTier', 'downloadExpiresAtMs', 'storageTier', 'storageQuotaBytes', 'grantedBy', 'updatedAt'
+          ]))
+          ||
+          // Tier 2: Owner updates PINs or local storage used telemetry
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'kidsPinHash', 'adultPinHash', 'storageUsedBytes', 'updatedAt'
+          ]))
+          ||
+          // Tier 3: Owner redeems NEWUSER2026, VER-1-0XEROTV, or an active admin promoCode atomically
+          (isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'downloadTier', 'downloadExpiresAtMs', 'storageTier', 'storageQuotaBytes', 'redeemedCodes', 'grantedBy', 'updatedAt'
+            ])
+            && incoming().redeemedCodes.size() > 0
+            && isValidUserRedemptionMutation(userId, incoming().redeemedCodes[incoming().redeemedCodes.size() - 1])
+          )
+        );
+
+      allow delete: if false;
+
+      // Isolated PII subcollection
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && (isOwner(userId) || isAdmin());
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && docId == 'profile'
+          && isOwner(userId)
+          && isValidPrivateProfile(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && docId == 'profile'
+          && isOwner(userId)
+          && isValidPrivateProfile(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'updatedAt']);
+
+        allow delete: if false;
+      }
+
+      // One-time code redemption ledger
+      match /redemptions/{codeId} {
+        allow get: if isValidId(userId) && isValidId(codeId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && (isOwner(userId) || isAdmin()) && resource.data.uid == userId;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(codeId)
+          && isOwner(userId)
+          && isValidRedemption(incoming(), userId, codeId)
+          && incoming().redeemedAt == request.time
+          && !exists(/databases/$(database)/documents/users/$(userId)/redemptions/$(codeId))
+          && (
+            (codeId == 'NEWUSER2026' && incoming().daysGranted == 2 && incoming().storageBonusBytes == 2147483648)
+            ||
+            (codeId == 'VER-1-0XEROTV' && incoming().daysGranted == 20 && incoming().storageBonusBytes == 5368709120)
+            ||
+            (exists(/databases/$(database)/documents/promoCodes/$(codeId))
+              && get(/databases/$(database)/documents/promoCodes/$(codeId)).data.active == true
+              && incoming().daysGranted == get(/databases/$(database)/documents/promoCodes/$(codeId)).data.daysGranted
+              && incoming().storageBonusBytes == get(/databases/$(database)/documents/promoCodes/$(codeId)).data.storageBonusBytes)
+          );
+
+        allow update, delete: if false;
+      }
+    }
+
+    // Short UserID lookup for Admin Subscription Giver
+    match /userLookup/{shortUserId} {
+      allow get: if isValidId(shortUserId) && (isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(shortUserId)
+        && isValidUserLookup(incoming(), shortUserId)
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && !exists(/databases/$(database)/documents/userLookup/$(shortUserId));
+
+      allow update, delete: if false;
+    }
+
+    // Admin-managed promo codes
+    match /promoCodes/{codeId} {
+      allow get: if isVerifiedUser() && isValidId(codeId);
+      allow list: if isAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(codeId)
+        && isValidPromoCode(incoming(), codeId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(codeId)
+        && isValidPromoCode(incoming(), codeId)
+        && incoming().code == existing().code
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isAdmin() && isValidId(codeId);
+    }
+
+    // Honest Public Aggregate Stats (no PII)
+    match /stats/{statId} {
+      allow get: if statId == 'public';
+      allow list: if false;
+
+      allow create: if statId == 'public'
+        && isVerifiedUser()
+        && isValidPublicStats(incoming())
+        && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && incoming().registeredUsersCount == 1
+        && incoming().totalEarningsPesos == 0
+        && incoming().updatedAt == request.time;
+
+      allow update: if statId == 'public'
+        && isValidPublicStats(incoming())
+        && incoming().updatedAt == request.time
+        && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['registeredUsersCount', 'totalEarningsPesos', 'updatedAt']))
+          ||
+          (isVerifiedUser()
+            && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['registeredUsersCount', 'updatedAt'])
+            && incoming().registeredUsersCount == existing().registeredUsersCount + 1
+            && incoming().totalEarningsPesos == existing().totalEarningsPesos)
+        );
+
+      allow delete: if false;
+    }
+
+    // Anonymous Active Viewer Presence Heartbeats (for truthful Live Online count)
+    match /presence/{sessionId} {
+      allow list: if true;
+      allow get: if isValidId(sessionId);
+
+      allow create: if isValidId(sessionId)
+        && isValidPresence(incoming(), sessionId)
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(sessionId)
+        && isValidPresence(incoming(), sessionId)
+        && incoming().sessionId == existing().sessionId
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isAdmin();
+    }
+
+    // User Feedback Ratings & Bug Reports (no PII, bounded payload)
+    match /feedbackReports/{reportId} {
+      allow list: if true;
+      allow get: if isValidId(reportId);
+
+      allow create: if isValidId(reportId)
+        && isValidFeedbackReport(incoming(), reportId)
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(reportId)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        && incoming().status in ['open', 'resolved'];
+
+      allow delete: if isAdmin() && isValidId(reportId);
+    }
+
+    // Admin role markers
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+  }
+}

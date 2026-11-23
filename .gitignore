@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+dev-dist/
+coverage/
+.playwright-cli/
+.vercel/
+.firebase/
+.DS_Store
+*.log
+*.idsig
+*.keystore
+*.jks
+.env*
+!.env.example
+android-builder/build/
