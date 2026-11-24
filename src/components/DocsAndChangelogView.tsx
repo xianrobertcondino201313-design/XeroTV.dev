@@ -21,7 +21,7 @@ import {
   fetchHonestPlatformPulse,
   submitFeedbackReport,
   type HonestPlatformPulse,
-} from '../lib/firebase';
+} from '../lib/authClient';
 import type { ProfileMode } from '../utils/modes';
 import { playClickFx, playErrorFx, playUnlockFx } from '../utils/soundFx';
 import { TiltGlassCard } from './TiltGlassCard';
@@ -54,7 +54,7 @@ const IMPROVING_1_0_ITEMS = [
   {
     title: 'Anti-Bot Gate & Exploit Protection',
     detail:
-      'Added You’re-Not-a-Bot verification prior to Auth, API rate limiting, admin brute-force lockout, and dynamic Firestore promo code validation.',
+      'Added You’re-Not-a-Bot verification on built-in sign-in & registration, API rate limiting, admin brute-force lockout, and dynamic server promo code validation.',
   },
   {
     title: 'Promo Code VER-1-0XEROTV & Admin Code Generator',
@@ -205,7 +205,7 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
               <div className="text-2xl font-bold font-display" data-testid="pulse-registered-users">
                 {pulse?.registeredUsers ?? '—'}
               </div>
-              <div className="text-[11px] opacity-65">Verified Firestore accounts</div>
+              <div className="text-[11px] opacity-65">Verified XEROTV accounts</div>
             </div>
           </TiltGlassCard>
 

@@ -5,7 +5,7 @@ import {
   buildEmbedUrl,
   getNextServerId,
 } from './servers';
-import { formatFirebaseAuthError } from './authError';
+import { formatLocalAuthError } from './authError';
 
 test('streaming servers integrate 10 live mstream servers with VidZen popup-free default', () => {
   assert.equal(STREAMING_SERVERS.length, 11);
@@ -46,16 +46,14 @@ test('buildEmbedUrl constructs clean single-slash movie, TV, and trailer URLs', 
   }
 });
 
-test('formatFirebaseAuthError classifies unauthorized-domain with actionable host info', () => {
-  const err = Object.assign(new Error('Firebase: Error (auth/unauthorized-domain).'), {
-    code: 'auth/unauthorized-domain',
-  });
-  const formatted = formatFirebaseAuthError(err, 'xerotv.vercel.app');
-  assert.equal(formatted.isUnauthorizedDomain, true);
-  assert.equal(formatted.code, 'auth/unauthorized-domain');
-  assert.match(formatted.message, /xerotv\.vercel\.app/);
+test('formatLocalAuthError classifies credential, duplicate email, and rate-limit errors clearly', () => {
+  const invalid = formatLocalAuthError(new Error('Incorrect email/username or password.'), 'auth/invalid-credentials');
+  assert.equal(invalid.code, 'auth/invalid-credentials');
+  assert.match(invalid.message, /incorrect/i);
 
-  const popupErr = formatFirebaseAuthError({ code: 'auth/popup-blocked' }, 'localhost');
-  assert.equal(popupErr.isUnauthorizedDomain, false);
-  assert.match(popupErr.message, /blocked/i);
+  const dup = formatLocalAuthError(new Error('Email already exists'), 'auth/email-in-use');
+  assert.equal(dup.code, 'auth/email-in-use');
+
+  const rate = formatLocalAuthError(new Error('Locked for 60s'), 'auth/too-many-requests');
+  assert.equal(rate.code, 'auth/too-many-requests');
 });

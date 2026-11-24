@@ -90,11 +90,14 @@ export default defineConfig(() => {
           runtimeCaching: [
             {
               urlPattern: ({ url }) =>
+                url.pathname.startsWith('/api/auth/') ||
                 url.pathname.startsWith('/api/download/') ||
                 url.pathname.startsWith('/api/admin/') ||
                 url.pathname.startsWith('/api/apps/') ||
                 url.pathname.startsWith('/api/speedtest/') ||
-                url.pathname.startsWith('/api/security/'),
+                url.pathname.startsWith('/api/security/') ||
+                url.pathname.startsWith('/api/account/') ||
+                url.pathname.startsWith('/api/platform/'),
               handler: 'NetworkOnly',
             },
             {
@@ -168,12 +171,6 @@ export default defineConfig(() => {
       rolldownOptions: {
         output: {
           manualChunks(id: string) {
-            if (id.includes('node_modules/@firebase/firestore') || id.includes('node_modules/firebase/firestore')) {
-              return 'vendor-firebase-firestore';
-            }
-            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
-              return 'vendor-firebase';
-            }
             if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
               return 'vendor-react';
             }

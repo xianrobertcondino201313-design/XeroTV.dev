@@ -31,7 +31,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({ docType, onClose }) => {
     privacy: {
       title: 'Privacy Policy',
       body: [
-        'Authentication and subscription records are stored securely in Firebase Authentication and Cloud Firestore with owner-only access rules.',
+        'Built-in XEROTV authentication and subscription records use salted password hashing and signed HttpOnly session cookies with owner-only access controls.',
         'Offline downloaded movies are stored locally inside your browser/device IndexedDB storage vault and never uploaded to external trackers.',
         'Parental and 18+ PINs are stored as SHA-256 digests so raw PIN digits are never saved in plaintext.',
       ],

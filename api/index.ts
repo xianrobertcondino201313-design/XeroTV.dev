@@ -6,6 +6,25 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import {
+  normalizeAuthEmail,
+  normalizeAuthUsername,
+  validateLoginInput,
+  validateRegistrationInput,
+  type AuthUser,
+} from '../src/utils/authHelpers';
+import { sanitizePlainText, sanitizePromoCode } from '../src/utils/security';
+import {
+  calculateAdminGrantUpdate,
+  calculateGrantAmountPesos,
+  calculateRedemptionUpdate,
+  formatBytes,
+  generateShortUserId,
+  ONE_GB_BYTES,
+  type AdminGrantType,
+  type CustomPromoDefinition,
+  type UserSubscriptionState,
+} from '../src/utils/subscription';
 
 const execFileAsync = promisify(execFile);
 
@@ -110,9 +129,15 @@ const DEFAULT_TMDB_READ_TOKEN =
   'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyM2JmYjg4ZmRkMGYyYWIyZDViZTdkN2JhYjAwNDA2NSIsIm5iZiI6MTc5NDQ5NzA2MC42MjQsInN1YiI6IjZhZjVkYTI0NzNhYmYxYzg5YjJiZGZmYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.ygPWQOs_w9L5obHG6T36n5Y03AAHsoMC_WnL1GEnfqw';
 const DEFAULT_TMDB_API_KEY = '23bfb88fdd0f2ab2d5be7d7bab004065';
 
+const EPHEMERAL_SIGNING_FALLBACK = crypto.randomBytes(32).toString('hex');
 const ADMIN_SECRET_SIGNING_KEY = crypto
   .createHash('sha256')
-  .update(process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_ACCESS_CODE || 'xerotv-xian-production-key')
+  .update(
+    process.env.SESSION_SECRET ||
+      process.env.ADMIN_SESSION_SECRET ||
+      process.env.ADMIN_ACCESS_CODE ||
+      EPHEMERAL_SIGNING_FALLBACK,
+  )
   .digest();
 
 const OPEN_CINEMA_STREAMS_HD = [
@@ -490,6 +515,240 @@ function verifyHmacPayload<T = Record<string, unknown>>(token: string | undefine
   }
 }
 
+// -----------------------------------------------------------------------------
+// Server-Side Persistent Store (Replaces Cloud Firestore cleanly)
+// -----------------------------------------------------------------------------
+const STORE_FILE_PATH = process.env.XEROTV_STORE_PATH || '/tmp/xerotv-store.json';
+
+interface StoredUserRecord {
+  user: AuthUser;
+  account: UserSubscriptionState;
+  passwordHash?: string;
+  emailNormalized?: string;
+  usernameNormalized?: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+interface StoredPromoRecord extends CustomPromoDefinition {
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+interface StoredFeedbackRecord {
+  id: string;
+  category: 'feedback' | 'bug';
+  rating: number;
+  title: string;
+  message: string;
+  appVersion: string;
+  status: 'open' | 'resolved';
+  createdAtMs: number;
+}
+
+interface PersistentStoreData {
+  users: Record<string, StoredUserRecord>;
+  shortIdToUid: Record<string, string>;
+  promoCodes: Record<string, StoredPromoRecord>;
+  presence: Record<string, { sessionId: string; mode: string; lastSeenAtMs: number }>;
+  feedbackReports: StoredFeedbackRecord[];
+  totalEarningsPesos: number;
+}
+
+function createEmptyStore(): PersistentStoreData {
+  return {
+    users: {},
+    shortIdToUid: {},
+    promoCodes: {},
+    presence: {},
+    feedbackReports: [],
+    totalEarningsPesos: 0,
+  };
+}
+
+let inMemoryStore: PersistentStoreData | null = null;
+
+function readStore(): PersistentStoreData {
+  if (inMemoryStore) return inMemoryStore;
+  try {
+    if (fs.existsSync(STORE_FILE_PATH)) {
+      const raw = fs.readFileSync(STORE_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<PersistentStoreData>;
+      inMemoryStore = {
+        users: parsed.users || {},
+        shortIdToUid: parsed.shortIdToUid || {},
+        promoCodes: parsed.promoCodes || {},
+        presence: parsed.presence || {},
+        feedbackReports: Array.isArray(parsed.feedbackReports) ? parsed.feedbackReports : [],
+        totalEarningsPesos: typeof parsed.totalEarningsPesos === 'number' ? parsed.totalEarningsPesos : 0,
+      };
+      return inMemoryStore;
+    }
+  } catch {
+    // start fresh if store file unreadable
+  }
+  inMemoryStore = createEmptyStore();
+  return inMemoryStore;
+}
+
+function writeStore(store: PersistentStoreData): void {
+  inMemoryStore = store;
+  try {
+    const tmpPath = `${STORE_FILE_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(store), 'utf8');
+    fs.renameSync(tmpPath, STORE_FILE_PATH);
+  } catch {
+    // non-fatal on read-only paths; in-memory state remains active
+  }
+}
+
+interface SignedUserSessionPayload {
+  kind: 'user_auth';
+  user: AuthUser;
+  account: UserSubscriptionState;
+  exp: number;
+}
+
+function signUserAuthToken(user: AuthUser, account: UserSubscriptionState): string {
+  return signHmacPayload({
+    kind: 'user_auth',
+    user,
+    account,
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  });
+}
+
+function getUserTokenFromReq(req: Request): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const candidate = authHeader.slice(7).trim();
+    const parsed = verifyHmacPayload<{ kind?: string }>(candidate);
+    if (parsed?.kind === 'user_auth') {
+      return candidate;
+    }
+  }
+  const cookies = parseCookies(req);
+  return cookies.xtv_auth_session;
+}
+
+function hydrateSessionRecord(req: Request): { user: AuthUser; account: UserSubscriptionState } | null {
+  const token = getUserTokenFromReq(req);
+  const parsed = verifyHmacPayload<SignedUserSessionPayload>(token);
+  if (!parsed || parsed.kind !== 'user_auth' || !parsed.user?.uid) {
+    return null;
+  }
+
+  const store = readStore();
+  const uid = parsed.user.uid;
+  const existing = store.users[uid];
+  if (existing) {
+    return { user: existing.user, account: existing.account };
+  }
+
+  // Rehydrate cleanly from HMAC-signed token after serverless cold start
+  const shortUserId = parsed.account?.shortUserId || generateShortUserId(uid);
+  const restoredAccount: UserSubscriptionState = {
+    uid,
+    shortUserId,
+    downloadTier: parsed.account?.downloadTier || 'free',
+    downloadExpiresAtMs: parsed.account?.downloadExpiresAtMs || 0,
+    storageTier: parsed.account?.storageTier || 'none',
+    storageQuotaBytes: parsed.account?.storageQuotaBytes || 0,
+    storageUsedBytes: parsed.account?.storageUsedBytes || 0,
+    redeemedCodes: Array.isArray(parsed.account?.redeemedCodes) ? parsed.account.redeemedCodes : [],
+    xerostarActive: Boolean(parsed.account?.xerostarActive),
+    xerostarExpiresAtMs: parsed.account?.xerostarExpiresAtMs || 0,
+    kidsPinHash: parsed.account?.kidsPinHash,
+    adultPinHash: parsed.account?.adultPinHash,
+    xerohotsPinHash: parsed.account?.xerohotsPinHash,
+    grantedBy: parsed.account?.grantedBy,
+  };
+
+  store.users[uid] = {
+    user: parsed.user,
+    account: restoredAccount,
+    emailNormalized: normalizeAuthEmail(parsed.user.email),
+    usernameNormalized: normalizeAuthUsername(parsed.user.username || parsed.user.displayName),
+    createdAtMs: Date.now(),
+    updatedAtMs: Date.now(),
+  };
+  store.shortIdToUid[shortUserId] = uid;
+  writeStore(store);
+  return { user: parsed.user, account: restoredAccount };
+}
+
+function hashUserPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyUserPassword(password: string, storedHash: string | undefined): boolean {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, hex] = storedHash.split(':');
+  if (!salt || !hex) return false;
+  try {
+    const expected = Buffer.from(hex, 'hex');
+    const actual = crypto.scryptSync(password, salt, 64);
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+function verifyBotTokenOrChallenge(body: Record<string, unknown> | undefined):
+  | { ok: true; botToken: string }
+  | { ok: false; error: string } {
+  const existingBotToken = typeof body?.botToken === 'string' ? body.botToken.trim() : '';
+  if (existingBotToken) {
+    const verified = verifyHmacPayload<{ kind?: string }>(existingBotToken);
+    if (verified?.kind === 'bot-verified') {
+      return { ok: true, botToken: existingBotToken };
+    }
+  }
+
+  const challengeToken = typeof body?.challengeToken === 'string' ? body.challengeToken.trim() : '';
+  const botAnswer = typeof body?.botAnswer === 'string' ? body.botAnswer.trim() : '';
+  if (!challengeToken || !botAnswer) {
+    return { ok: false, error: 'Please answer the human verification check.' };
+  }
+
+  const parsedChallenge = verifyHmacPayload<{ kind?: string; expected?: string }>(challengeToken);
+  if (!parsedChallenge || parsedChallenge.kind !== 'bot-challenge' || !parsedChallenge.expected) {
+    return { ok: false, error: 'Verification challenge expired. Please try again.' };
+  }
+
+  const a = Buffer.from(botAnswer);
+  const b = Buffer.from(parsedChallenge.expected);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok) {
+    return { ok: false, error: 'Incorrect human verification answer. Please check the math.' };
+  }
+
+  const freshBotToken = signHmacPayload({
+    kind: 'bot-verified',
+    exp: Date.now() + 30 * 60 * 1000,
+  });
+  return { ok: true, botToken: freshBotToken };
+}
+
+function buildAuthCookieHeader(token: string, maxAgeSec: number): string {
+  return `xtv_auth_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${maxAgeSec}`;
+}
+
+function isSafeBrowserMutation(req: Request): boolean {
+  if (req.headers.authorization?.startsWith('Bearer ')) return true;
+  if (String(req.get('x-requested-with') || '') === 'XEROTV') return true;
+  const origin = String(req.get('origin') || '').trim();
+  const host = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  if (!origin || !host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export function createApiApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
@@ -608,6 +867,381 @@ export function createApiApp() {
       exp: Date.now() + 30 * 60 * 1000,
     });
     return res.json({ verified: true, botToken });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Built-In XEROTV Authentication (Zero External APIs Needed)
+  // ---------------------------------------------------------------------------
+  const authFailMap = new Map<string, { attempts: number; lockedUntil: number }>();
+
+  app.post('/api/auth/register', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ ok: false, code: 'auth/forbidden', error: 'Invalid request origin.' });
+    }
+
+    const botCheck = verifyBotTokenOrChallenge(req.body as Record<string, unknown>);
+    if (!botCheck.ok) {
+      return res.status(400).json({ ok: false, code: 'auth/bot-check-failed', error: botCheck.error });
+    }
+
+    const validation = validateRegistrationInput({
+      displayName: String(req.body?.displayName || ''),
+      email: String(req.body?.email || ''),
+      password: String(req.body?.password || ''),
+      confirmPassword:
+        req.body?.confirmPassword !== undefined ? String(req.body.confirmPassword) : undefined,
+    });
+    if (!validation.ok) {
+      return res.status(400).json({ ok: false, code: 'auth/invalid-input', error: validation.error });
+    }
+
+    const store = readStore();
+    const existingEmail = Object.values(store.users).find(
+      (r) => (r.emailNormalized || normalizeAuthEmail(r.user.email)) === validation.email,
+    );
+    if (existingEmail) {
+      return res.status(409).json({
+        ok: false,
+        code: 'auth/email-in-use',
+        error: 'An account with this email already exists. Switch to Sign In.',
+      });
+    }
+
+    const uid = `xtv_${crypto.createHash('sha256').update(validation.email).digest('hex').slice(0, 16)}`;
+    const shortUserId = generateShortUserId(uid);
+
+    const usernameConflict = Object.values(store.users).some(
+      (r) => (r.usernameNormalized || normalizeAuthUsername(r.user.username || '')) === validation.username,
+    );
+    const finalUsername = usernameConflict
+      ? `${validation.username.slice(0, 24)}_${shortUserId.slice(-4).toLowerCase()}`
+      : validation.username;
+
+    const authUser: AuthUser = {
+      uid,
+      provider: 'xerotv',
+      username: finalUsername,
+      displayName: validation.displayName,
+      email: validation.email,
+      photoURL: null,
+    };
+
+    const account: UserSubscriptionState = {
+      uid,
+      shortUserId,
+      downloadTier: 'free',
+      downloadExpiresAtMs: 0,
+      storageTier: 'none',
+      storageQuotaBytes: 0,
+      storageUsedBytes: 0,
+      redeemedCodes: [],
+      xerostarActive: false,
+      xerostarExpiresAtMs: 0,
+    };
+
+    const now = Date.now();
+    store.users[uid] = {
+      user: authUser,
+      account,
+      passwordHash: hashUserPassword(validation.password),
+      emailNormalized: validation.email,
+      usernameNormalized: finalUsername,
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+    store.shortIdToUid[shortUserId] = uid;
+    writeStore(store);
+
+    const token = signUserAuthToken(authUser, account);
+    res.setHeader('Set-Cookie', buildAuthCookieHeader(token, 30 * 24 * 60 * 60));
+    return res.status(201).json({
+      ok: true,
+      user: authUser,
+      account,
+      token,
+      botToken: botCheck.botToken,
+    });
+  });
+
+  app.post('/api/auth/login', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ ok: false, code: 'auth/forbidden', error: 'Invalid request origin.' });
+    }
+
+    const ip = getClientIp(req);
+    const now = Date.now();
+    const failTracker = authFailMap.get(ip);
+    if (failTracker && failTracker.lockedUntil > now) {
+      const waitSec = Math.ceil((failTracker.lockedUntil - now) / 1000);
+      return res.status(429).json({
+        ok: false,
+        code: 'auth/too-many-requests',
+        error: `Too many failed sign-in attempts. Locked for ${waitSec}s.`,
+      });
+    }
+
+    const botCheck = verifyBotTokenOrChallenge(req.body as Record<string, unknown>);
+    if (!botCheck.ok) {
+      return res.status(400).json({ ok: false, code: 'auth/bot-check-failed', error: botCheck.error });
+    }
+
+    const validation = validateLoginInput({
+      identifier: String(req.body?.identifier || ''),
+      password: String(req.body?.password || ''),
+    });
+    if (!validation.ok) {
+      return res.status(400).json({ ok: false, code: 'auth/invalid-input', error: validation.error });
+    }
+
+    const store = readStore();
+    const cleanId = validation.identifier;
+    const cleanHandle = normalizeAuthUsername(cleanId);
+    const record = Object.values(store.users).find((r) => {
+      const em = r.emailNormalized || normalizeAuthEmail(r.user.email);
+      const un = r.usernameNormalized || normalizeAuthUsername(r.user.username || '');
+      const sid = (r.account.shortUserId || '').toLowerCase();
+      return em === cleanId || (cleanHandle && un === cleanHandle) || sid === cleanId;
+    });
+
+    if (!record || !verifyUserPassword(validation.password, record.passwordHash)) {
+      const nextAttempts =
+        (failTracker && failTracker.lockedUntil <= now ? failTracker.attempts : 0) + 1;
+      if (nextAttempts >= 5) {
+        authFailMap.set(ip, { attempts: 0, lockedUntil: now + 60_000 });
+        return res.status(429).json({
+          ok: false,
+          code: 'auth/too-many-requests',
+          error: 'Too many failed sign-in attempts. Locked for 60s.',
+        });
+      }
+      authFailMap.set(ip, { attempts: nextAttempts, lockedUntil: 0 });
+      return res.status(401).json({
+        ok: false,
+        code: 'auth/invalid-credentials',
+        error: 'Incorrect email/username or password.',
+      });
+    }
+
+    authFailMap.delete(ip);
+    record.updatedAtMs = now;
+    writeStore(store);
+
+    const token = signUserAuthToken(record.user, record.account);
+    res.setHeader('Set-Cookie', buildAuthCookieHeader(token, 30 * 24 * 60 * 60));
+    return res.json({
+      ok: true,
+      user: record.user,
+      account: record.account,
+      token,
+      botToken: botCheck.botToken,
+    });
+  });
+
+  app.get('/api/auth/me', (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const session = hydrateSessionRecord(req);
+    if (!session) {
+      return res.json({ authenticated: false, user: null, account: null });
+    }
+    const freshToken = signUserAuthToken(session.user, session.account);
+    return res.json({
+      authenticated: true,
+      user: session.user,
+      account: session.account,
+      token: freshToken,
+    });
+  });
+
+  app.post('/api/auth/logout', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    res.setHeader('Set-Cookie', buildAuthCookieHeader('', 0));
+    res.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Authenticated Account Mutations (Promos, PIN Hashes, Storage Usage)
+  // ---------------------------------------------------------------------------
+  app.post('/api/account/redeem', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ ok: false, error: 'Invalid request origin.' });
+    }
+    const session = hydrateSessionRecord(req);
+    if (!session) {
+      return res.status(401).json({ ok: false, error: 'Please sign in first.' });
+    }
+
+    const code = sanitizePromoCode(String(req.body?.code || ''));
+    if (!code) {
+      return res.status(400).json({ ok: false, error: 'Please enter a valid promo code.' });
+    }
+
+    const store = readStore();
+    const record = store.users[session.user.uid];
+    if (!record) {
+      return res.status(404).json({ ok: false, error: 'Account record not found.' });
+    }
+
+    const customPromo = store.promoCodes[code] || null;
+    const calc = calculateRedemptionUpdate(record.account, code, Date.now(), customPromo);
+    if (!calc.ok) {
+      return res.status(400).json({ ok: false, error: calc.error });
+    }
+
+    record.account = {
+      ...record.account,
+      ...calc.patch,
+    };
+    record.updatedAtMs = Date.now();
+    writeStore(store);
+
+    const token = signUserAuthToken(record.user, record.account);
+    res.setHeader('Set-Cookie', buildAuthCookieHeader(token, 30 * 24 * 60 * 60));
+    return res.json({
+      ok: true,
+      message: `Code ${calc.code} redeemed: +${calc.daysGranted} Days Download Access & +${formatBytes(calc.storageBonusBytes)} Storage unlocked.`,
+      account: record.account,
+      user: record.user,
+      token,
+    });
+  });
+
+  app.post('/api/account/pin', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ ok: false, error: 'Invalid request origin.' });
+    }
+    const session = hydrateSessionRecord(req);
+    if (!session) {
+      return res.status(401).json({ ok: false, error: 'Sign in required.' });
+    }
+    const kind = String(req.body?.kind || '');
+    const pinHash = String(req.body?.pinHash || '').trim();
+    if (!['kids', 'adult', 'hots'].includes(kind) || !/^[a-f0-9]{16,128}$/i.test(pinHash)) {
+      return res.status(400).json({ ok: false, error: 'Invalid PIN payload.' });
+    }
+
+    const store = readStore();
+    const record = store.users[session.user.uid];
+    if (!record) {
+      return res.status(404).json({ ok: false, error: 'Account not found.' });
+    }
+
+    if (kind === 'kids') record.account.kidsPinHash = pinHash;
+    else if (kind === 'adult') record.account.adultPinHash = pinHash;
+    else record.account.xerohotsPinHash = pinHash;
+
+    record.updatedAtMs = Date.now();
+    writeStore(store);
+
+    const token = signUserAuthToken(record.user, record.account);
+    res.setHeader('Set-Cookie', buildAuthCookieHeader(token, 30 * 24 * 60 * 60));
+    return res.json({ ok: true, account: record.account, token });
+  });
+
+  app.post('/api/account/storage', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ ok: false, error: 'Invalid request origin.' });
+    }
+    const session = hydrateSessionRecord(req);
+    if (!session) {
+      return res.status(401).json({ ok: false, error: 'Sign in required.' });
+    }
+    const bytes = Math.max(0, Math.round(Number(req.body?.storageUsedBytes || 0)));
+    const store = readStore();
+    const record = store.users[session.user.uid];
+    if (!record) {
+      return res.status(404).json({ ok: false, error: 'Account not found.' });
+    }
+
+    record.account.storageUsedBytes = bytes;
+    record.updatedAtMs = Date.now();
+    writeStore(store);
+
+    const token = signUserAuthToken(record.user, record.account);
+    res.setHeader('Set-Cookie', buildAuthCookieHeader(token, 30 * 24 * 60 * 60));
+    return res.json({ ok: true, account: record.account, token });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Honest Platform Metrics, Presence & Feedback (Server-Backed)
+  // ---------------------------------------------------------------------------
+  app.post('/api/platform/presence', (req: Request, res: Response) => {
+    const sessionId = sanitizePlainText(String(req.body?.sessionId || ''), 64);
+    const mode = sanitizePlainText(String(req.body?.mode || 'main'), 24);
+    if (!sessionId || !/^[a-zA-Z0-9_-]{6,64}$/.test(sessionId)) {
+      return res.status(400).json({ ok: false });
+    }
+    const store = readStore();
+    const now = Date.now();
+    store.presence[sessionId] = { sessionId, mode, lastSeenAtMs: now };
+    for (const [k, entry] of Object.entries(store.presence)) {
+      if (now - entry.lastSeenAtMs > 10 * 60 * 1000) {
+        delete store.presence[k];
+      }
+    }
+    writeStore(store);
+    return res.json({ ok: true });
+  });
+
+  app.get('/api/platform/pulse', (_req: Request, res: Response) => {
+    const store = readStore();
+    const cutoff = Date.now() - 3 * 60 * 1000;
+    const onlineUsers = Math.max(
+      1,
+      Object.values(store.presence).filter((p) => p.lastSeenAtMs >= cutoff).length,
+    );
+    const registeredUsers = Object.keys(store.users).length;
+    const ratings = store.feedbackReports
+      .map((r) => r.rating)
+      .filter((n) => typeof n === 'number' && n >= 1 && n <= 5);
+    const ratingCount = ratings.length;
+    const popularityPct =
+      ratingCount > 0 ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratingCount / 5) * 100) : null;
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      registeredUsers,
+      onlineUsers,
+      totalEarningsPesos: store.totalEarningsPesos,
+      popularityPct,
+      ratingCount,
+    });
+  });
+
+  app.get('/api/platform/feedback', (_req: Request, res: Response) => {
+    const store = readStore();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      reports: store.feedbackReports.slice(0, 50),
+    });
+  });
+
+  app.post('/api/platform/feedback', (req: Request, res: Response) => {
+    const category = req.body?.category === 'bug' ? 'bug' : 'feedback';
+    const title = sanitizePlainText(String(req.body?.title || ''), 120);
+    const message = sanitizePlainText(String(req.body?.message || ''), 800);
+    if (title.length < 2 || message.length < 4) {
+      return res.status(400).json({ error: 'Please provide a clear title and description.' });
+    }
+    const rating = Math.max(1, Math.min(5, Math.round(Number(req.body?.rating || 5))));
+    const report: StoredFeedbackRecord = {
+      id: `rep_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+      category,
+      rating,
+      title,
+      message,
+      appVersion: 'v1.0',
+      status: 'open',
+      createdAtMs: Date.now(),
+    };
+    const store = readStore();
+    store.feedbackReports.unshift(report);
+    if (store.feedbackReports.length > 200) {
+      store.feedbackReports = store.feedbackReports.slice(0, 200);
+    }
+    writeStore(store);
+    return res.status(201).json({ report });
   });
 
   // ---------------------------------------------------------------------------
@@ -1336,7 +1970,7 @@ export function createApiApp() {
     const token = createAdminToken();
     res.setHeader(
       'Set-Cookie',
-      `xtv_admin_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`,
+      `xtv_admin_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=43200`,
     );
     return res.json({ verified: true, token });
   });
@@ -1346,9 +1980,174 @@ export function createApiApp() {
     res.json({ verified });
   });
 
-  app.post('/api/admin/logout', (_req: Request, res: Response) => {
-    res.setHeader('Set-Cookie', 'xtv_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
-    res.json({ ok: true });
+  app.post('/api/admin/logout', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    res.setHeader(
+      'Set-Cookie',
+      'xtv_admin_session=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0',
+    );
+    return res.json({ ok: true });
+  });
+
+  app.get('/api/admin/users', (req: Request, res: Response) => {
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const store = readStore();
+    const users = Object.values(store.users)
+      .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+      .slice(0, 100)
+      .map((r) => r.account);
+    return res.json({ users });
+  });
+
+  app.post('/api/admin/grant', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const rawUserId = String(req.body?.userId || '').trim();
+    const grantType = String(req.body?.grantType || '') as AdminGrantType;
+    const customDays = Number(req.body?.customDays || 30);
+    const validGrants: AdminGrantType[] = [
+      'download_2m',
+      'storage_1tb',
+      'bundle_2m_1tb',
+      'xerostar',
+      'custom_days',
+      'revoke',
+    ];
+    if (!rawUserId || !validGrants.includes(grantType)) {
+      return res.status(400).json({ error: 'Invalid target UserID or subscription grant type.' });
+    }
+
+    const store = readStore();
+    let targetUid = rawUserId;
+    if (rawUserId.toUpperCase().startsWith('XTV-')) {
+      const mapped = store.shortIdToUid[rawUserId.toUpperCase()];
+      if (!mapped) {
+        return res.status(404).json({ error: `No user found with UserID "${rawUserId.toUpperCase()}".` });
+      }
+      targetUid = mapped;
+    }
+
+    const record = store.users[targetUid];
+    if (!record) {
+      return res.status(404).json({ error: `User "${rawUserId}" does not exist.` });
+    }
+
+    const patch = calculateAdminGrantUpdate(record.account, grantType, customDays, Date.now());
+    const amountPesos = calculateGrantAmountPesos(grantType);
+    record.account = {
+      ...record.account,
+      ...patch,
+    };
+    record.updatedAtMs = Date.now();
+    if (amountPesos > 0) {
+      store.totalEarningsPesos += amountPesos;
+    }
+    writeStore(store);
+
+    return res.json({
+      targetUid,
+      shortUserId: record.account.shortUserId,
+      amountPesos,
+      patch,
+    });
+  });
+
+  app.get('/api/admin/promos', (req: Request, res: Response) => {
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const store = readStore();
+    const promos = Object.values(store.promoCodes).sort((a, b) => b.createdAtMs - a.createdAtMs);
+    return res.json({ promos });
+  });
+
+  app.post('/api/admin/promos', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const code = sanitizePromoCode(String(req.body?.code || ''));
+    if (code.length < 3) {
+      return res.status(400).json({ error: 'Promo code must be at least 3 characters (A-Z, 0-9, -, _).' });
+    }
+    const daysGranted = Math.max(0, Math.min(3650, Math.floor(Number(req.body?.daysGranted || 0))));
+    const storageBonusGb = Math.max(0, Math.min(1024, Math.floor(Number(req.body?.storageBonusGb || 0))));
+    const storageBonusBytes = storageBonusGb * ONE_GB_BYTES;
+
+    const now = Date.now();
+    const promo: StoredPromoRecord = {
+      code,
+      daysGranted,
+      storageBonusBytes,
+      active: true,
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+    const store = readStore();
+    store.promoCodes[code] = promo;
+    writeStore(store);
+    return res.status(201).json({ promo });
+  });
+
+  app.patch('/api/admin/promos/:code', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const clean = sanitizePromoCode(String(req.params.code || ''));
+    const store = readStore();
+    if (!store.promoCodes[clean]) {
+      return res.status(404).json({ error: 'Promo code not found.' });
+    }
+    store.promoCodes[clean].active = Boolean(req.body?.active);
+    store.promoCodes[clean].updatedAtMs = Date.now();
+    writeStore(store);
+    return res.json({ promo: store.promoCodes[clean] });
+  });
+
+  app.delete('/api/admin/promos/:code', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const clean = sanitizePromoCode(String(req.params.code || ''));
+    const store = readStore();
+    delete store.promoCodes[clean];
+    writeStore(store);
+    return res.json({ ok: true });
+  });
+
+  app.patch('/api/admin/feedback/:id', (req: Request, res: Response) => {
+    if (!isSafeBrowserMutation(req)) {
+      return res.status(403).json({ error: 'Invalid request origin.' });
+    }
+    if (!verifyAdminToken(getAdminTokenFromReq(req))) {
+      return res.status(403).json({ error: 'Admin verification required.' });
+    }
+    const reportId = String(req.params.id || '');
+    const nextStatus = req.body?.status === 'resolved' ? 'resolved' : 'open';
+    const store = readStore();
+    const item = store.feedbackReports.find((r) => r.id === reportId);
+    if (!item) {
+      return res.status(404).json({ error: 'Feedback report not found.' });
+    }
+    item.status = nextStatus;
+    writeStore(store);
+    return res.json({ report: item });
   });
 
   app.get('/api/admin/download-source-zip', async (req: Request, res: Response) => {
@@ -1387,10 +2186,6 @@ export function createApiApp() {
         '.gitignore',
         '.gitattributes',
         '.env.example',
-        'firebase-blueprint.json',
-        'firebase-applet-config.json',
-        'firebase.json',
-        'firestore.rules',
         'eslint.config.js',
         '.github/workflows/ci.yml',
       ];
@@ -1423,10 +2218,10 @@ export function createApiApp() {
           `   git push -u origin main\n` +
           `   \`\`\`\n` +
           `3. Import the GitHub repository into **Vercel** (auto-detected via \`vercel.json\` + \`.npmrc\`), OR run \`npx vercel --prod\` directly in the folder.\n` +
-          `4. Optional Environment Variables in Vercel Project Settings:\n` +
+          `4. Environment Variables in Vercel Project Settings:\n` +
           `   - \`ADMIN_ACCESS_CODE\` (defaults cleanly if unset)\n` +
           `   - \`TMDB_READ_TOKEN\` (preconfigured default included)\n` +
-          `5. If using Google Sign-In on Firebase Auth, add your \`*.vercel.app\` domain under Firebase Console -> Authentication -> Settings -> Authorized domains.\n`,
+          `   - \`SESSION_SECRET\` (optional HMAC secret for session cookies; built-in XEROTV Sign In / Sign Up requires zero external auth APIs)\n`,
         { name: 'DEPLOY_VERCEL.md' },
       );
 

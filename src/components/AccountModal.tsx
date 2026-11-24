@@ -4,27 +4,34 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   Flame,
   Gift,
   HardDrive,
+  Lock,
   LogIn,
   LogOut,
+  Mail,
   RefreshCw,
   Shield,
   ShieldCheck,
+  User,
+  UserPlus,
   X,
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
 import {
-  formatFirebaseAuthError,
-  redeemPromoCodeInFirestore,
-  signInWithGoogle,
+  formatLocalAuthError,
+  loginBuiltInAccount,
+  redeemPromoCode,
+  registerBuiltInAccount,
   signOutUser,
+  type AuthUser,
   type FormattedAuthError,
-} from '../lib/firebase';
+} from '../lib/authClient';
 import {
+  getBotVerifiedToken,
   isBotVerifiedThisSession,
-  saveBotVerifiedSession,
 } from '../utils/security';
 import { playClickFx, playErrorFx, playTypingFx, playUnlockFx } from '../utils/soundFx';
 import {
@@ -37,9 +44,11 @@ import {
 
 const DEV_FACEBOOK_URL = 'https://web.facebook.com/share/p/1E7E6y8HAD/';
 
+type AuthModeTab = 'signin' | 'register';
+
 interface AccountModalProps {
   open: boolean;
-  user: User | null;
+  user: AuthUser | null;
   account: UserSubscriptionState | null;
   onClose: () => void;
 }
@@ -53,29 +62,35 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [redeemStatus, setRedeemStatus] = useState<{ ok: boolean; text: string } | null>(null);
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState<FormattedAuthError | null>(null);
-  const [copiedDomain, setCopiedDomain] = useState(false);
   const [redeemBusy, setRedeemBusy] = useState(false);
 
-  // "You're Not a Bot" Security Check state
+  // Built-in Auth Form State (Zero External APIs)
+  const [authTab, setAuthTab] = useState<AuthModeTab>('signin');
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<FormattedAuthError | null>(null);
+
+  // Inline "You're Not a Bot" Security Check
   const [botVerified, setBotVerified] = useState<boolean>(() => isBotVerifiedThisSession());
   const [challengeQuestion, setChallengeQuestion] = useState('');
   const [challengeToken, setChallengeToken] = useState('');
   const [botAnswer, setBotAnswer] = useState('');
-  const [botBusy, setBotBusy] = useState(false);
-  const [botError, setBotError] = useState('');
 
   const loadBotChallenge = async () => {
-    setBotError('');
     setBotAnswer('');
     try {
       const res = await fetch('/api/security/bot-challenge', { cache: 'no-store' });
       const data = await res.json();
-      setChallengeQuestion(data.question || 'Verify human: 3 + 4 = ?');
+      setChallengeQuestion(data.question || 'Human Check: What is 3 + 4?');
       setChallengeToken(data.challengeToken || '');
     } catch {
-      setBotError('Unable to reach verification server.');
+      setChallengeQuestion('Unable to load human verification check.');
+      setChallengeToken('');
     }
   };
 
@@ -83,6 +98,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     if (!open || user) return;
     const already = isBotVerifiedThisSession();
     setBotVerified(already);
+    setAuthError(null);
     if (!already) {
       void loadBotChallenge();
     }
@@ -90,67 +106,67 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   if (!open) return null;
 
-  const handleVerifyBot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBotError('');
-    setBotBusy(true);
-    try {
-      const res = await fetch('/api/security/bot-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challengeToken, answer: botAnswer }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.verified || !data.botToken) {
-        playErrorFx();
-        setBotError(data.error || 'Verification failed.');
-        await loadBotChallenge();
-        return;
-      }
-      playUnlockFx();
-      saveBotVerifiedSession(data.botToken);
-      setBotVerified(true);
-    } catch {
-      playErrorFx();
-      setBotError('Verification request failed.');
-    } finally {
-      setBotBusy(false);
-    }
+  const handleSwitchTab = (tab: AuthModeTab) => {
+    playClickFx();
+    setAuthTab(tab);
+    setAuthError(null);
   };
 
-  const handleGoogleAuth = async () => {
-    const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (!botVerified) {
-      setAuthError({
-        code: 'security/bot-required',
-        message: 'Please complete the human verification check first.',
-        isUnauthorizedDomain: false,
-        hostname: host,
-      });
-      return;
-    }
+  const handleSignOut = () => {
+    playClickFx();
+    setAuthTab('signin');
+    setDisplayName('');
+    setEmail('');
+    setIdentifier('');
+    setPassword('');
+    setConfirmPassword('');
+    setAuthError(null);
+    setRedeemStatus(null);
+    void signOutUser();
+  };
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setAuthError(null);
     setAuthBusy(true);
+
+    const existingBotToken = getBotVerifiedToken();
+
     try {
-      await signInWithGoogle();
+      if (authTab === 'register') {
+        await registerBuiltInAccount({
+          displayName,
+          email,
+          password,
+          confirmPassword,
+          botToken: existingBotToken,
+          challengeToken: existingBotToken ? undefined : challengeToken,
+          botAnswer: existingBotToken ? undefined : botAnswer,
+        });
+      } else {
+        await loginBuiltInAccount({
+          identifier,
+          password,
+          botToken: existingBotToken,
+          challengeToken: existingBotToken ? undefined : challengeToken,
+          botAnswer: existingBotToken ? undefined : botAnswer,
+        });
+      }
       playUnlockFx();
+      setBotVerified(true);
+      setPassword('');
+      setConfirmPassword('');
+      setBotAnswer('');
     } catch (err) {
       playErrorFx();
-      setAuthError(formatFirebaseAuthError(err, host));
+      const typed = err as { code?: string };
+      setAuthError(formatLocalAuthError(err, typed?.code));
+      if (!existingBotToken || typed?.code === 'auth/bot-check-failed') {
+        setBotVerified(false);
+        void loadBotChallenge();
+      }
     } finally {
       setAuthBusy(false);
-    }
-  };
-
-  const handleCopyBlockedDomain = async (domain: string) => {
-    if (!domain) return;
-    playClickFx();
-    try {
-      await navigator.clipboard.writeText(domain);
-      setCopiedDomain(true);
-      setTimeout(() => setCopiedDomain(false), 2000);
-    } catch {
-      // ignore clipboard errors
     }
   };
 
@@ -168,7 +184,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     setRedeemStatus(null);
     setRedeemBusy(true);
     try {
-      const res = await redeemPromoCodeInFirestore(account, promoCode);
+      const res = await redeemPromoCode(promoCode);
       if (res.ok) {
         playUnlockFx();
         setRedeemStatus({ ok: true, text: res.message });
@@ -205,7 +221,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               XEROTV Account &amp; Subscriptions
             </h2>
             <p className="text-xs text-zinc-400 mt-1">
-              Sign in with Google to generate your UserID, redeem codes, and activate offline downloads.
+              Sign in or create your built-in XEROTV account to get your UserID, redeem codes, and unlock offline downloads.
             </p>
           </div>
           <button
@@ -219,40 +235,240 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         </div>
 
         {!user ? (
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-6 space-y-5">
-            <div className="text-center space-y-2">
-              <Shield className="w-10 h-10 mx-auto text-zinc-300" />
-              <h3 className="text-lg font-bold font-display">Protected Authentication</h3>
-              <p className="text-sm text-zinc-400 max-w-md mx-auto">
-                Complete human verification below to unlock Google Sign-In and receive your unique XEROTV UserID.
-              </p>
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                  <Shield className="w-5 h-5 text-zinc-200" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold font-display">
+                    {authTab === 'signin' ? 'Sign In to XEROTV' : 'Create XEROTV Account'}
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Built-in XEROTV authentication — no external apps or API keys required.
+                  </p>
+                </div>
+              </div>
+
+              <div className="inline-flex shrink-0 rounded-xl bg-black/50 border border-white/15 p-1 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchTab('signin')}
+                  data-testid="auth-tab-signin"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    authTab === 'signin'
+                      ? 'bg-white text-zinc-950'
+                      : 'text-zinc-300 hover:text-white'
+                  }`}
+                >
+                  <LogIn className="w-3.5 h-3.5 shrink-0" />
+                  <span>Sign In</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchTab('register')}
+                  data-testid="auth-tab-register"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    authTab === 'register'
+                      ? 'bg-white text-zinc-950'
+                      : 'text-zinc-300 hover:text-white'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                  <span>Create Account</span>
+                </button>
+              </div>
             </div>
 
-            {!botVerified ? (
-              <form
-                onSubmit={handleVerifyBot}
-                className="max-w-sm mx-auto rounded-2xl bg-black/40 border border-white/15 p-4 space-y-3"
+            {authError && (
+              <div
+                role="alert"
+                className="rounded-xl bg-rose-500/15 border border-rose-400/35 px-4 py-3 text-xs text-rose-200"
               >
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>You&apos;re Not a Bot Verification</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void loadBotChallenge()}
-                    aria-label="New human verification challenge"
-                    className="p-1 text-zinc-400 hover:text-white cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {authError.message}
+              </div>
+            )}
 
-                <div className="text-sm font-mono font-semibold text-zinc-100">
-                  {challengeQuestion || 'Loading challenge...'}
-                </div>
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              {authTab === 'register' ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label htmlFor="auth-display-name" className="block text-xs font-medium text-zinc-300">
+                        Display Name / Username
+                      </label>
+                      <div className="relative">
+                        <User className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          id="auth-display-name"
+                          type="text"
+                          required
+                          minLength={2}
+                          maxLength={50}
+                          value={displayName}
+                          onChange={(e) => {
+                            playTypingFx();
+                            setDisplayName(e.target.value);
+                          }}
+                          placeholder="e.g. Xian"
+                          className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                        />
+                      </div>
+                    </div>
 
-                <div className="flex gap-2">
+                    <div className="space-y-1.5">
+                      <label htmlFor="auth-register-email" className="block text-xs font-medium text-zinc-300">
+                        Email Address
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          id="auth-register-email"
+                          type="email"
+                          required
+                          value={email}
+                          onChange={(e) => {
+                            playTypingFx();
+                            setEmail(e.target.value);
+                          }}
+                          placeholder="you@example.com"
+                          className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label htmlFor="auth-register-password" className="block text-xs font-medium text-zinc-300">
+                        Password (6+ chars)
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          id="auth-register-password"
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          maxLength={128}
+                          value={password}
+                          onChange={(e) => {
+                            playTypingFx();
+                            setPassword(e.target.value);
+                          }}
+                          placeholder="Create a password"
+                          className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                          className="p-1 text-zinc-400 hover:text-white absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="auth-register-confirm" className="block text-xs font-medium text-zinc-300">
+                        Confirm Password
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          id="auth-register-confirm"
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          maxLength={128}
+                          value={confirmPassword}
+                          onChange={(e) => {
+                            playTypingFx();
+                            setConfirmPassword(e.target.value);
+                          }}
+                          placeholder="Repeat password"
+                          className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label htmlFor="auth-login-identifier" className="block text-xs font-medium text-zinc-300">
+                      Email, Username, or UserID
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        id="auth-login-identifier"
+                        type="text"
+                        required
+                        value={identifier}
+                        onChange={(e) => {
+                          playTypingFx();
+                          setIdentifier(e.target.value);
+                        }}
+                        placeholder="you@example.com or XTV-..."
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="auth-login-password" className="block text-xs font-medium text-zinc-300">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        id="auth-login-password"
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => {
+                          playTypingFx();
+                          setPassword(e.target.value);
+                        }}
+                        placeholder="Enter your password"
+                        className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-black/50 border border-white/15 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        className="p-1 text-zinc-400 hover:text-white absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Compact Inline Human Verification */}
+              {!botVerified ? (
+                <div className="rounded-xl bg-black/40 border border-white/15 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>You&apos;re Not a Bot Check</span>
+                      <button
+                        type="button"
+                        onClick={() => void loadBotChallenge()}
+                        aria-label="New human verification challenge"
+                        className="p-1 text-zinc-400 hover:text-white cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="text-xs font-mono text-zinc-200">
+                      {challengeQuestion || 'Loading challenge...'}
+                    </div>
+                  </div>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -264,90 +480,31 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     }}
                     placeholder="Answer..."
                     aria-label="Human verification answer"
-                    className="flex-1 px-3 py-2 rounded-xl bg-zinc-900 border border-white/15 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+                    className="sm:w-32 px-3 py-2 rounded-lg bg-zinc-900 border border-white/15 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-white/40"
                   />
-                  <button
-                    type="submit"
-                    disabled={botBusy || !challengeToken}
-                    className="px-4 py-2 rounded-xl bg-white text-zinc-950 text-xs font-bold hover:bg-zinc-200 cursor-pointer disabled:opacity-50"
-                  >
-                    {botBusy ? 'Checking...' : 'Verify Human'}
-                  </button>
                 </div>
-
-                {botError && (
-                  <p className="text-xs text-rose-400" role="alert">
-                    {botError}
-                  </p>
-                )}
-              </form>
-            ) : (
-              <div className="text-center space-y-4">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Verified Human · Auth Unlocked</span>
+                  <span>Human Check Verified for Session</span>
                 </div>
+              )}
 
-                {authError && (
-                  <div
-                    role="alert"
-                    className="max-w-md mx-auto rounded-2xl bg-rose-500/15 border border-rose-400/35 p-4 text-left space-y-2.5"
-                  >
-                    <div className="text-xs font-bold text-rose-300">
-                      {authError.isUnauthorizedDomain
-                        ? 'Action Required: Authorize This Vercel Domain in Firebase'
-                        : 'Google Sign-In Notice'}
-                    </div>
-                    <p className="text-xs text-rose-100 leading-relaxed">{authError.message}</p>
-                    {authError.isUnauthorizedDomain && authError.hostname && (
-                      <div className="space-y-2 pt-1">
-                        <p className="text-[11px] text-zinc-300">
-                          Copy the hostname below and add it under{' '}
-                          <span className="font-semibold text-white">
-                            Firebase Console &rarr; Authentication &rarr; Settings &rarr; Authorized domains
-                          </span>
-                          . You can continue streaming freely as a guest meanwhile.
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <code className="px-2.5 py-1.5 rounded-lg bg-black/50 border border-white/15 font-mono text-[11px] text-white truncate max-w-full">
-                            {authError.hostname}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => void handleCopyBlockedDomain(authError.hostname)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white text-zinc-950 text-[11px] font-semibold cursor-pointer hover:bg-zinc-200"
-                          >
-                            {copiedDomain ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                            <span>{copiedDomain ? 'Copied' : 'Copy Domain'}</span>
-                          </button>
-                          <a
-                            href="https://console.firebase.google.com/project/gen-lang-client-0171219951/authentication/settings"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 text-white text-[11px] font-semibold hover:bg-white/25"
-                          >
-                            <span>Open Firebase Settings</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <button
-                    type="button"
-                    disabled={authBusy}
-                    onClick={handleGoogleAuth}
-                    className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-white text-zinc-950 text-sm font-semibold hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-60"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span>{authBusy ? 'Connecting Google...' : 'Continue with Google'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
+              <button
+                type="submit"
+                disabled={authBusy || (!botVerified && !challengeToken)}
+                data-testid="auth-submit-btn"
+                className="w-full py-3 rounded-xl bg-white text-zinc-950 text-sm font-bold hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {authBusy
+                  ? authTab === 'register'
+                    ? 'Creating Account...'
+                    : 'Signing In...'
+                  : authTab === 'register'
+                    ? 'Create Account & Generate UserID'
+                    : 'Sign In to XEROTV'}
+              </button>
+            </form>
           </div>
         ) : !account ? (
           <div className="rounded-2xl bg-white/5 border border-white/10 p-6 space-y-4 text-center">
@@ -355,15 +512,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             <div className="space-y-1">
               <div className="text-base font-bold font-display">Syncing Your XEROTV Account</div>
               <p className="text-xs text-zinc-400">
-                Signed in as {user.email || user.displayName || 'Google Member'}. Connecting to Cloud Firestore...
+                Signed in as {user.email || user.displayName}. Loading subscription profile...
               </p>
             </div>
             <button
               type="button"
-              onClick={() => {
-                playClickFx();
-                void signOutUser();
-              }}
+              onClick={handleSignOut}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15 text-xs font-semibold text-zinc-300 hover:bg-white/10 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -375,7 +529,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             {/* Identity & Copyable UserID */}
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1 min-w-0">
-                <div className="text-sm font-semibold truncate">{user.displayName || 'XEROTV Member'}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold truncate">{user.displayName || 'XEROTV Member'}</span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/10 text-[10px] uppercase font-mono text-zinc-300">
+                    XEROTV ID
+                  </span>
+                </div>
                 <div className="text-xs text-zinc-400 truncate">{user.email}</div>
                 <div className="pt-2 flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-zinc-400">Your UserID:</span>
@@ -396,10 +555,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    playClickFx();
-                    void signOutUser();
-                  }}
+                  onClick={handleSignOut}
                   aria-label="Sign out"
                   className="p-2 rounded-xl border border-white/15 text-zinc-300 hover:bg-white/10 cursor-pointer"
                 >
@@ -542,16 +698,16 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-white/10 border border-white/15 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="text-xs text-zinc-300 leading-relaxed">
-                  Copy your UserID (<span className="font-mono font-semibold text-white">{account.shortUserId}</span>) and message
-                  the developer on Facebook to arrange payment and instant account activation.
-                </div>
+              <div className="rounded-2xl bg-white/5 border border-white/10 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  To activate Download Access, 1TB Storage, or XEROSTAR VIP, send your UserID{' '}
+                  <code className="font-mono text-white">{account.shortUserId}</code> to XIAN IN PRODUCTION.
+                </p>
                 <a
                   href={DEV_FACEBOOK_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-zinc-950 text-xs font-semibold whitespace-nowrap shrink-0 hover:bg-zinc-200 transition-colors"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-zinc-950 text-xs font-semibold hover:bg-zinc-200 transition-colors shrink-0"
                 >
                   <span>Contact Developer</span>
                   <ExternalLink className="w-3.5 h-3.5" />

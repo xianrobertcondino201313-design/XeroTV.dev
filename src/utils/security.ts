@@ -43,3 +43,18 @@ export function saveBotVerifiedSession(token: string, ttlMs: number = 30 * 60 * 
     // ignore storage failures
   }
 }
+
+export function getBotVerifiedToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem('xtv_bot_verified');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { token?: string; expiresAtMs?: number };
+    if (parsed.token && parsed.expiresAtMs && parsed.expiresAtMs > Date.now()) {
+      return parsed.token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

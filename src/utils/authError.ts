@@ -1,55 +1,51 @@
 export interface FormattedAuthError {
   code: string;
   message: string;
-  isUnauthorizedDomain: boolean;
-  hostname: string;
 }
 
-export function formatFirebaseAuthError(error: unknown, hostname: string = ''): FormattedAuthError {
+export function formatLocalAuthError(
+  error: unknown,
+  extraCode?: string,
+): FormattedAuthError {
   const rawCode =
-    typeof (error as { code?: unknown })?.code === 'string'
+    extraCode ||
+    (typeof (error as { code?: unknown })?.code === 'string'
       ? (error as { code: string }).code
-      : '';
-  const rawMessage = error instanceof Error ? error.message : String(error || 'Sign-in failed.');
+      : '');
+  const rawMessage =
+    error instanceof Error ? error.message : String(error || 'Authentication failed.');
   const lower = `${rawCode} ${rawMessage}`.toLowerCase();
 
-  if (lower.includes('unauthorized-domain')) {
+  if (lower.includes('too-many-requests') || lower.includes('locked')) {
     return {
-      code: 'auth/unauthorized-domain',
-      message: `Domain "${hostname || 'this site'}" is not authorized in Firebase Auth yet.`,
-      isUnauthorizedDomain: true,
-      hostname,
+      code: 'auth/too-many-requests',
+      message: rawMessage || 'Too many sign-in attempts. Please wait a moment and try again.',
     };
   }
-  if (lower.includes('popup-blocked')) {
+
+  if (lower.includes('email-in-use') || lower.includes('already exists')) {
     return {
-      code: 'auth/popup-blocked',
-      message: 'Sign-in popup was blocked by your browser. Allow popups for this site and try again.',
-      isUnauthorizedDomain: false,
-      hostname,
+      code: 'auth/email-in-use',
+      message: rawMessage || 'An account with this email already exists. Please sign in instead.',
     };
   }
-  if (lower.includes('popup-closed-by-user') || lower.includes('cancelled-popup-request')) {
+
+  if (lower.includes('invalid-credentials') || lower.includes('incorrect')) {
     return {
-      code: rawCode || 'auth/popup-closed-by-user',
-      message: 'Google Sign-In window was closed before finishing.',
-      isUnauthorizedDomain: false,
-      hostname,
+      code: 'auth/invalid-credentials',
+      message: rawMessage || 'Incorrect email/username or password.',
     };
   }
-  if (lower.includes('network-request-failed')) {
+
+  if (lower.includes('failed to fetch') || lower.includes('network')) {
     return {
-      code: 'auth/network-request-failed',
-      message: 'Network connection interrupted during Google Sign-In. Check your internet and try again.',
-      isUnauthorizedDomain: false,
-      hostname,
+      code: 'auth/network-error',
+      message: 'Connection interrupted while reaching XEROTV authentication. Please try again.',
     };
   }
 
   return {
-    code: rawCode || 'auth/unknown',
+    code: rawCode || 'auth/error',
     message: rawMessage,
-    isUnauthorizedDomain: false,
-    hostname,
   };
 }

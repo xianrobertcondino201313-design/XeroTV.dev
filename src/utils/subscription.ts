@@ -113,7 +113,7 @@ export function canDownloadMovie(
   nowMs: number = Date.now(),
 ): { allowed: boolean; reason?: string } {
   if (!account) {
-    return { allowed: false, reason: 'Please sign in with Google to download movies offline.' };
+    return { allowed: false, reason: 'Please sign in via Account to download movies offline.' };
   }
   if (!isDownloadAccessActive(account, nowMs)) {
     return {

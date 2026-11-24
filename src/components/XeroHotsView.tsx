@@ -222,7 +222,7 @@ export const XeroHotsView: React.FC<XeroHotsViewProps> = ({
             ) : (
               <>
                 <p className="text-xs text-zinc-300">
-                  Sign in with Google first to receive your UserID, then activate the ₱150 XEROSTAR VIP plan.
+                  Sign in or create a free XEROTV account first to receive your UserID, then activate the ₱150 XEROSTAR VIP plan.
                 </p>
                 <button
                   type="button"

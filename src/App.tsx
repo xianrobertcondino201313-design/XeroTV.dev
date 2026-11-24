@@ -1,18 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
 import { Bookmark, Film, HardDriveDownload, Play, RefreshCw, Search, WifiOff } from 'lucide-react';
 import {
-  auth,
-  db,
-  ensureUserDocuments,
-  handleFirestoreError,
-  isTransientOfflineFirestoreError,
-  OperationType,
+  refreshAuthSession,
   saveUserPinHash,
-  syncStorageUsedToFirestore,
+  subscribeAuthState,
+  syncStorageUsed,
   upsertPresenceHeartbeat,
-} from './lib/firebase';
+  type AuthUser,
+} from './lib/authClient';
 import {
   listOfflineMovies,
   type OfflineMovieSummary,
@@ -104,7 +99,7 @@ function XeroTvShell() {
   const isOnline = useOnlineStatus();
   const { unreadCount, pushNotification } = useDownloadManager();
 
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [account, setAccount] = useState<UserSubscriptionState | null>(null);
 
   const [mode, setMode] = useState<ProfileMode>('main');
@@ -192,59 +187,27 @@ function XeroTvShell() {
     return () => window.clearTimeout(timer);
   }, [isOnline, pushNotification]);
 
-  // Firebase Auth & Account listener + mark hasLoggedInBefore so Introduce never auto-opens again
+  // Built-in XEROTV account session listener + mark hasLoggedInBefore so Introduce never auto-opens again
   useEffect(() => {
-    let unsubAccount: (() => void) | null = null;
-
-    const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
-      if (unsubAccount) {
-        unsubAccount();
-        unsubAccount = null;
-      }
-      setUser(fbUser);
-      if (!fbUser) {
-        setAccount(null);
+    const unsubscribe = subscribeAuthState(({ user: nextUser, account: nextAccount }) => {
+      setUser(nextUser);
+      setAccount(nextAccount);
+      if (!nextUser) {
         setHotsUnlockedThisSession(false);
         return;
       }
-
-      // Permanent dismissal of auto-Introduce once logged in at least once
       try {
         window.localStorage.setItem(HAS_LOGGED_IN_KEY, '1');
       } catch {
         // ignore storage failures
       }
       setIntroduceOpen(false);
-
-      try {
-        const initialOrCached = await ensureUserDocuments(fbUser);
-        setAccount((prev) => prev || initialOrCached);
-        const userRef = doc(db, 'users', fbUser.uid);
-        unsubAccount = onSnapshot(
-          userRef,
-          (snap) => {
-            if (snap.exists()) {
-              setAccount(snap.data() as UserSubscriptionState);
-            }
-          },
-          (err) => {
-            if (isTransientOfflineFirestoreError(err)) {
-              console.warn('Firestore live listener waiting for network recovery.');
-              return;
-            }
-            handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
-          },
-        );
-      } catch (err) {
-        if (!isTransientOfflineFirestoreError(err)) {
-          console.error(err);
-        }
-      }
     });
 
+    void refreshAuthSession();
+
     return () => {
-      unsubAuth();
-      if (unsubAccount) unsubAccount();
+      unsubscribe();
     };
   }, []);
 
@@ -463,7 +426,7 @@ function XeroTvShell() {
             : 'xtv_adult_pin_hash';
       localStorage.setItem(storageKey, pinHash);
       if (user) {
-        saveUserPinHash(user.uid, pinPrompt.pinKind, pinHash).catch(() => {});
+        saveUserPinHash(pinPrompt.pinKind, pinHash).catch(() => {});
       }
     }
     const { pinKind, targetMode, targetSection } = pinPrompt;
@@ -481,7 +444,7 @@ function XeroTvShell() {
   const handleVaultChanged = async (newUsedBytes: number) => {
     await refreshVault();
     if (user) {
-      syncStorageUsedToFirestore(user.uid, newUsedBytes).catch(() => {});
+      syncStorageUsed(newUsedBytes).catch(() => {});
     }
   };
 
@@ -982,10 +945,7 @@ function XeroTvShell() {
 
       <LegalModal docType={legalDoc} onClose={() => setLegalDoc(null)} />
 
-      <AdminTriggerAndModal
-        isSignedIn={!!user}
-        onOpenAccount={() => setAccountOpen(true)}
-      />
+      <AdminTriggerAndModal />
     </div>
   );
 }

@@ -8,7 +8,6 @@ import {
   HelpCircle,
   Lock,
   Plus,
-  ShieldAlert,
   ShieldCheck,
   Trash2,
   UserCheck,
@@ -23,41 +22,29 @@ import {
   adminSetFeedbackStatus,
   adminTogglePromoCode,
   fetchFeedbackReports,
-  isCurrentUserAdmin,
   type FeedbackReportItem,
-  type FirestorePromoCode,
-} from '../lib/firebase';
+} from '../lib/authClient';
 import {
   formatBytes,
   isXeroStarActive,
   type AdminGrantType,
+  type CustomPromoDefinition,
   type UserSubscriptionState,
 } from '../utils/subscription';
 import { playClickFx, playErrorFx, playUnlockFx } from '../utils/soundFx';
 
 interface AdminTriggerAndModalProps {
-  isSignedIn: boolean;
+  isSignedIn?: boolean;
   onOpenAccount?: () => void;
 }
 
 type AdminTab = 'grants' | 'codes' | 'reports' | 'zip';
 
-const ADMIN_TOKEN_KEY = 'xtv_admin_token';
-
-export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
-  isSignedIn,
-  onOpenAccount,
-}) => {
+export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = () => {
   const [open, setOpen] = useState(false);
   const [verified, setVerified] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>('grants');
-  const [adminToken, setAdminToken] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem(ADMIN_TOKEN_KEY);
-    } catch {
-      return null;
-    }
-  });
+  const [adminToken, setAdminToken] = useState<string | null>(null);
   const [accessCode, setAccessCode] = useState('');
   const [verifyError, setVerifyError] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -72,7 +59,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
   const [usersError, setUsersError] = useState('');
 
   // Code Generator
-  const [promoList, setPromoList] = useState<FirestorePromoCode[]>([]);
+  const [promoList, setPromoList] = useState<CustomPromoDefinition[]>([]);
   const [newCodeStr, setNewCodeStr] = useState('');
   const [newCodeDays, setNewCodeDays] = useState(14);
   const [newCodeGb, setNewCodeGb] = useState(5);
@@ -90,35 +77,22 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     if (!open || !verified) return;
 
     let cancelled = false;
-    if (isSignedIn) {
-      void isCurrentUserAdmin().then((isAdm) => {
+    adminFetchUsersList(adminToken)
+      .then((list) => {
         if (cancelled) return;
-        if (!isAdm) {
-          setUsersError(
-            'Authenticate with the bootstrapped developer Google account to browse the full user directory & manage Firestore codes.',
-          );
-          return;
-        }
-        adminFetchUsersList()
-          .then((list) => {
-            if (cancelled) return;
-            setUsersList(list);
-            setUsersError('');
-          })
-          .catch(() => {
-            if (cancelled) return;
-            setUsersError(
-              'Authenticate with the bootstrapped developer Google account to browse the full user directory & manage Firestore codes.',
-            );
-          });
-
-        adminListPromoCodes()
-          .then((list) => {
-            if (!cancelled) setPromoList(list);
-          })
-          .catch(() => {});
+        setUsersList(list);
+        setUsersError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setUsersError(err instanceof Error ? err.message : 'Unable to load user directory.');
       });
-    }
+
+    adminListPromoCodes(adminToken)
+      .then((list) => {
+        if (!cancelled) setPromoList(list);
+      })
+      .catch(() => {});
 
     fetchFeedbackReports()
       .then((list) => {
@@ -129,7 +103,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, verified, isSignedIn]);
+  }, [open, verified, adminToken]);
 
   const handleOpen = async () => {
     playClickFx();
@@ -137,18 +111,13 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     try {
       const headers: Record<string, string> = {};
       if (adminToken) headers.Authorization = `Bearer ${adminToken}`;
-      const res = await fetch('/api/admin/status', { headers });
+      const res = await fetch('/api/admin/status', { headers, credentials: 'include' });
       const data = await res.json();
       if (data.verified) {
         setVerified(true);
       } else {
         setVerified(false);
         setAdminToken(null);
-        try {
-          sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-        } catch {
-          // ignore
-        }
       }
     } catch {
       // keep prompt open
@@ -162,6 +131,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     try {
       const res = await fetch('/api/admin/verify', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accessCode }),
       });
@@ -173,15 +143,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
       }
       playUnlockFx();
       setVerified(true);
-      const nextToken = data.token || null;
-      setAdminToken(nextToken);
-      if (nextToken) {
-        try {
-          sessionStorage.setItem(ADMIN_TOKEN_KEY, nextToken);
-        } catch {
-          // ignore
-        }
-      }
+      setAdminToken(data.token || null);
       setAccessCode('');
     } catch {
       playErrorFx();
@@ -196,14 +158,14 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     setGrantFeedback(null);
     setGrantBusy(true);
     try {
-      const res = await adminGrantSubscriptionByUserId(targetUserId, grantType, customDays);
+      const res = await adminGrantSubscriptionByUserId(adminToken, targetUserId, grantType, customDays);
       playUnlockFx();
       setGrantFeedback({
         ok: true,
         text: `Updated ${res.shortUserId} · Tier: ${res.patch.downloadTier} · Quota: ${formatBytes(res.patch.storageQuotaBytes)}${res.patch.xerostarActive ? ' · XEROSTAR VIP Active' : ''}${res.amountPesos > 0 ? ` · Ledger +₱${res.amountPesos}` : ''}`,
       });
       setTargetUserId('');
-      const refreshed = await adminFetchUsersList().catch(() => null);
+      const refreshed = await adminFetchUsersList(adminToken).catch(() => null);
       if (refreshed) setUsersList(refreshed);
     } catch (err) {
       playErrorFx();
@@ -227,7 +189,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
     setCodeFeedback(null);
     setCodeBusy(true);
     try {
-      const created = await adminCreatePromoCode({
+      const created = await adminCreatePromoCode(adminToken, {
         code: newCodeStr,
         daysGranted: newCodeDays,
         storageBonusGb: newCodeGb,
@@ -238,7 +200,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
         text: `Generated ${created.code} (+${created.daysGranted} days, +${formatBytes(created.storageBonusBytes)})`,
       });
       setNewCodeStr('');
-      const refreshed = await adminListPromoCodes().catch(() => null);
+      const refreshed = await adminListPromoCodes(adminToken).catch(() => null);
       if (refreshed) setPromoList(refreshed);
     } catch (err) {
       playErrorFx();
@@ -398,29 +360,6 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                   ))}
                 </div>
 
-                {!isSignedIn && activeTab !== 'zip' && (
-                  <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-400/30 text-xs text-amber-200 flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <ShieldAlert className="w-4 h-4 shrink-0" />
-                      <span>
-                        Sign in with the developer Google account to commit cross-user grants or write Firestore promo codes.
-                      </span>
-                    </div>
-                    {onOpenAccount && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOpen(false);
-                          onOpenAccount();
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-amber-300 text-zinc-950 font-semibold hover:bg-amber-200 cursor-pointer shrink-0"
-                      >
-                        Sign In Now
-                      </button>
-                    )}
-                  </div>
-                )}
-
                 {activeTab === 'grants' && (
                   <>
                     <form
@@ -499,7 +438,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
 
                       <button
                         type="submit"
-                        disabled={grantBusy || !isSignedIn}
+                        disabled={grantBusy}
                         className="px-5 py-2.5 rounded-xl bg-white text-zinc-950 text-xs font-semibold hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
                       >
                         {grantBusy ? 'Applying Grant...' : 'Submit Subscription Grant'}
@@ -633,7 +572,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
 
                       <button
                         type="submit"
-                        disabled={codeBusy || !isSignedIn}
+                        disabled={codeBusy}
                         className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-white text-zinc-950 text-xs font-semibold hover:bg-zinc-200 cursor-pointer disabled:opacity-50"
                       >
                         <Plus className="w-4 h-4" />
@@ -669,8 +608,8 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={async () => {
-                                    await adminTogglePromoCode(p.code, !p.active);
-                                    const refreshed = await adminListPromoCodes();
+                                    await adminTogglePromoCode(adminToken, p.code, !p.active);
+                                    const refreshed = await adminListPromoCodes(adminToken);
                                     setPromoList(refreshed);
                                   }}
                                   className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer"
@@ -681,8 +620,8 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                                   type="button"
                                   aria-label={`Delete ${p.code}`}
                                   onClick={async () => {
-                                    await adminDeletePromoCode(p.code);
-                                    const refreshed = await adminListPromoCodes();
+                                    await adminDeletePromoCode(adminToken, p.code);
+                                    const refreshed = await adminListPromoCodes(adminToken);
                                     setPromoList(refreshed);
                                   }}
                                   className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 cursor-pointer"
@@ -722,14 +661,13 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                               </div>
                               <button
                                 type="button"
-                                disabled={!isSignedIn}
                                 onClick={async () => {
                                   const nextStatus = rep.status === 'open' ? 'resolved' : 'open';
-                                  await adminSetFeedbackStatus(rep.id, nextStatus);
+                                  await adminSetFeedbackStatus(adminToken, rep.id, nextStatus);
                                   const next = await fetchFeedbackReports();
                                   setReports(next);
                                 }}
-                                className={`px-2.5 py-1 rounded-lg font-semibold cursor-pointer disabled:opacity-40 ${
+                                className={`px-2.5 py-1 rounded-lg font-semibold cursor-pointer ${
                                   rep.status === 'resolved'
                                     ? 'bg-emerald-500/20 text-emerald-300'
                                     : 'bg-amber-500/20 text-amber-200'
@@ -758,7 +696,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                           <h3 className="text-base font-bold font-display">Files &quot;ZIP&quot; — GitHub &amp; Vercel Ready</h3>
                         </div>
                         <p className="text-xs text-zinc-400">
-                          Packages the full-stack XEROTV codebase (src, api, public, server.ts, vercel.json, .npmrc, .gitignore, .gitattributes, GitHub CI, and firestore.rules) for error-free GitHub sync &amp; Vercel deployment.
+                          Packages the full-stack XEROTV codebase (src, api, public, server.ts, vercel.json, .npmrc, .gitignore, .gitattributes, and GitHub CI) for error-free GitHub sync &amp; Vercel deployment.
                         </p>
                       </div>
                       <button
