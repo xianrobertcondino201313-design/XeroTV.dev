@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  Flame,
   Gift,
   HardDrive,
   LogIn,
@@ -15,9 +16,11 @@ import {
 } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import {
+  formatFirebaseAuthError,
   redeemPromoCodeInFirestore,
   signInWithGoogle,
   signOutUser,
+  type FormattedAuthError,
 } from '../lib/firebase';
 import {
   isBotVerifiedThisSession,
@@ -27,6 +30,7 @@ import { playClickFx, playErrorFx, playTypingFx, playUnlockFx } from '../utils/s
 import {
   formatBytes,
   isDownloadAccessActive,
+  isXeroStarActive,
   SUBSCRIPTION_PLANS,
   type UserSubscriptionState,
 } from '../utils/subscription';
@@ -50,7 +54,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [promoCode, setPromoCode] = useState('');
   const [redeemStatus, setRedeemStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState('');
+  const [authError, setAuthError] = useState<FormattedAuthError | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
   const [redeemBusy, setRedeemBusy] = useState(false);
 
   // "You're Not a Bot" Security Check state
@@ -114,20 +119,38 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   };
 
   const handleGoogleAuth = async () => {
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
     if (!botVerified) {
-      setAuthError('Please complete the human verification check first.');
+      setAuthError({
+        code: 'security/bot-required',
+        message: 'Please complete the human verification check first.',
+        isUnauthorizedDomain: false,
+        hostname: host,
+      });
       return;
     }
-    setAuthError('');
+    setAuthError(null);
     setAuthBusy(true);
     try {
       await signInWithGoogle();
       playUnlockFx();
     } catch (err) {
       playErrorFx();
-      setAuthError(err instanceof Error ? err.message : 'Sign-in failed.');
+      setAuthError(formatFirebaseAuthError(err, host));
     } finally {
       setAuthBusy(false);
+    }
+  };
+
+  const handleCopyBlockedDomain = async (domain: string) => {
+    if (!domain) return;
+    playClickFx();
+    try {
+      await navigator.clipboard.writeText(domain);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2000);
+    } catch {
+      // ignore clipboard errors
     }
   };
 
@@ -166,6 +189,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   };
 
   const downloadActive = isDownloadAccessActive(account);
+  const xerostarActive = isXeroStarActive(account);
 
   return (
     <div
@@ -194,7 +218,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           </button>
         </div>
 
-        {!user || !account ? (
+        {!user ? (
           <div className="rounded-2xl bg-white/5 border border-white/10 p-6 space-y-5">
             <div className="text-center space-y-2">
               <Shield className="w-10 h-10 mx-auto text-zinc-300" />
@@ -265,9 +289,50 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
 
                 {authError && (
-                  <p className="text-xs text-rose-400" role="alert">
-                    {authError}
-                  </p>
+                  <div
+                    role="alert"
+                    className="max-w-md mx-auto rounded-2xl bg-rose-500/15 border border-rose-400/35 p-4 text-left space-y-2.5"
+                  >
+                    <div className="text-xs font-bold text-rose-300">
+                      {authError.isUnauthorizedDomain
+                        ? 'Action Required: Authorize This Vercel Domain in Firebase'
+                        : 'Google Sign-In Notice'}
+                    </div>
+                    <p className="text-xs text-rose-100 leading-relaxed">{authError.message}</p>
+                    {authError.isUnauthorizedDomain && authError.hostname && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-[11px] text-zinc-300">
+                          Copy the hostname below and add it under{' '}
+                          <span className="font-semibold text-white">
+                            Firebase Console &rarr; Authentication &rarr; Settings &rarr; Authorized domains
+                          </span>
+                          . You can continue streaming freely as a guest meanwhile.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <code className="px-2.5 py-1.5 rounded-lg bg-black/50 border border-white/15 font-mono text-[11px] text-white truncate max-w-full">
+                            {authError.hostname}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyBlockedDomain(authError.hostname)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white text-zinc-950 text-[11px] font-semibold cursor-pointer hover:bg-zinc-200"
+                          >
+                            {copiedDomain ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedDomain ? 'Copied' : 'Copy Domain'}</span>
+                          </button>
+                          <a
+                            href="https://console.firebase.google.com/project/gen-lang-client-0171219951/authentication/settings"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 text-white text-[11px] font-semibold hover:bg-white/25"
+                          >
+                            <span>Open Firebase Settings</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 <div>
@@ -283,6 +348,27 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        ) : !account ? (
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-6 space-y-4 text-center">
+            <RefreshCw className="w-8 h-8 mx-auto text-zinc-300 animate-spin" />
+            <div className="space-y-1">
+              <div className="text-base font-bold font-display">Syncing Your XEROTV Account</div>
+              <p className="text-xs text-zinc-400">
+                Signed in as {user.email || user.displayName || 'Google Member'}. Connecting to Cloud Firestore...
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                playClickFx();
+                void signOutUser();
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15 text-xs font-semibold text-zinc-300 hover:bg-white/10 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
           </div>
         ) : (
           <div className="space-y-6">
@@ -323,7 +409,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             </div>
 
             {/* Active Plan Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 tabular-nums">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 tabular-nums">
               <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-1">
                 <div className="text-xs text-zinc-400">Offline Download Access</div>
                 <div className="text-base font-bold font-display">
@@ -350,6 +436,21 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     : account.storageTier === 'bonus_2gb'
                       ? 'Bonus Storage Active'
                       : 'No Storage Allocated Yet'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-rose-500/10 border border-rose-400/25 p-4 space-y-1">
+                <div className="text-xs text-rose-300 flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>XEROSTAR VIP (XeroHots)</span>
+                </div>
+                <div className="text-base font-bold font-display">
+                  {xerostarActive ? 'VIP Active' : 'Locked (₱150)'}
+                </div>
+                <div className="text-xs text-zinc-400">
+                  {xerostarActive && account.xerostarExpiresAtMs
+                    ? `Expires ${new Date(account.xerostarExpiresAtMs).toLocaleString()}`
+                    : '30 Days PIN-locked XeroHots access'}
                 </div>
               </div>
             </div>
@@ -405,7 +506,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             {/* Real Subscription Plans + Developer Payment Contact */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Official Subscriptions (Direct Developer Payment)</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
                   <div className="text-xs text-zinc-400">{SUBSCRIPTION_PLANS.DOWNLOAD_2M.durationLabel}</div>
                   <div className="text-lg font-bold font-display">
@@ -426,6 +527,18 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     {SUBSCRIPTION_PLANS.STORAGE_1TB.name}
                   </div>
                   <p className="text-xs text-zinc-400">{SUBSCRIPTION_PLANS.STORAGE_1TB.description}</p>
+                </div>
+
+                <div className="rounded-2xl bg-rose-500/10 border border-rose-400/25 p-4 space-y-2">
+                  <div className="text-xs text-rose-300">{SUBSCRIPTION_PLANS.XEROSTAR.durationLabel}</div>
+                  <div className="text-lg font-bold font-display">
+                    ₱{SUBSCRIPTION_PLANS.XEROSTAR.pricePesos} Pesos
+                  </div>
+                  <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 text-rose-400" />
+                    <span>{SUBSCRIPTION_PLANS.XEROSTAR.name}</span>
+                  </div>
+                  <p className="text-xs text-zinc-300">{SUBSCRIPTION_PLANS.XEROSTAR.description}</p>
                 </div>
               </div>
 

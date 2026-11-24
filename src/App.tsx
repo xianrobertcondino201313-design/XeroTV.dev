@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Film, HardDriveDownload, Play, RefreshCw, Search, WifiOff } from 'lucide-react';
+import { Bookmark, Film, HardDriveDownload, Play, RefreshCw, Search, WifiOff } from 'lucide-react';
 import {
   auth,
   db,
@@ -18,6 +18,7 @@ import {
   type OfflineMovieSummary,
 } from './lib/offlineVault';
 import { DownloadProvider, useDownloadManager } from './lib/downloadContext';
+import { WatchlistProvider, useWatchlist } from './lib/watchlistContext';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import {
   filterMediaForMode,
@@ -41,6 +42,7 @@ import { PlayerView } from './components/PlayerView';
 import { OfflineVaultView } from './components/OfflineVaultView';
 import { DocsAndChangelogView } from './components/DocsAndChangelogView';
 import { GetAppsView } from './components/GetAppsView';
+import { XeroHotsView } from './components/XeroHotsView';
 import { PinModal } from './components/PinModal';
 import { AccountModal } from './components/AccountModal';
 import { AdminTriggerAndModal } from './components/AdminTriggerAndModal';
@@ -74,7 +76,14 @@ const GENRE_FILTERS = [
 function getInitialSectionFromUrl(): AppSection {
   if (typeof window === 'undefined') return 'home';
   const param = new URLSearchParams(window.location.search).get('section');
-  if (param === 'movies' || param === 'series' || param === 'vault' || param === 'docs' || param === 'apps') {
+  if (
+    param === 'movies' ||
+    param === 'series' ||
+    param === 'hots' ||
+    param === 'vault' ||
+    param === 'docs' ||
+    param === 'apps'
+  ) {
     return param;
   }
   return 'home';
@@ -120,14 +129,18 @@ function XeroTvShell() {
   const [introduceOpen, setIntroduceOpen] = useState<boolean>(() => shouldShowIntroInitially());
   const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
 
+  const { items: watchlistItems, clearWatchlist } = useWatchlist();
+  const [hotsUnlockedThisSession, setHotsUnlockedThisSession] = useState(false);
+
   const [pinPrompt, setPinPrompt] = useState<{
     open: boolean;
     title: string;
     description: string;
     promptMode: 'create' | 'verify';
     expectedHash?: string;
-    pinKind: 'kids' | 'adult';
-    targetMode: ProfileMode;
+    pinKind: 'kids' | 'adult' | 'hots';
+    targetMode?: ProfileMode;
+    targetSection?: AppSection;
   } | null>(null);
 
   // Refresh local IndexedDB offline vault
@@ -154,26 +167,29 @@ function XeroTvShell() {
     return () => window.clearInterval(id);
   }, [mode]);
 
-  // Fetch Real TMDB New Releases into Notification Center
+  // Fetch Real TMDB New Releases into Notification Center (deferred 1.5s to keep first paint crisp)
   useEffect(() => {
     if (!isOnline) return;
-    cachedTmdbFetch<{ releases?: MediaItem[] }>('/api/tmdb/releases', TMDB_CACHE_TTL.MEDIUM)
-      .then((data) => {
-        const items = (data.releases || []).slice(0, 3);
-        for (const rel of items) {
-          const name = rel.title || rel.name;
-          if (!name) continue;
-          pushNotification({
-            id: `release-${rel.media_type || 'movie'}-${rel.id}`,
-            kind: 'release',
-            title: `New Release: ${name}`,
-            description: rel.overview
-              ? rel.overview.slice(0, 110) + (rel.overview.length > 110 ? '...' : '')
-              : 'Now streaming on XEROTV VidZen & NxSha servers.',
-          });
-        }
-      })
-      .catch(() => {});
+    const timer = window.setTimeout(() => {
+      cachedTmdbFetch<{ releases?: MediaItem[] }>('/api/tmdb/releases', TMDB_CACHE_TTL.MEDIUM)
+        .then((data) => {
+          const items = (data.releases || []).slice(0, 3);
+          for (const rel of items) {
+            const name = rel.title || rel.name;
+            if (!name) continue;
+            pushNotification({
+              id: `release-${rel.media_type || 'movie'}-${rel.id}`,
+              kind: 'release',
+              title: `New Release: ${name}`,
+              description: rel.overview
+                ? rel.overview.slice(0, 110) + (rel.overview.length > 110 ? '...' : '')
+                : 'Now streaming on XEROTV VidZen & mstream servers.',
+            });
+          }
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => window.clearTimeout(timer);
   }, [isOnline, pushNotification]);
 
   // Firebase Auth & Account listener + mark hasLoggedInBefore so Introduce never auto-opens again
@@ -188,6 +204,7 @@ function XeroTvShell() {
       setUser(fbUser);
       if (!fbUser) {
         setAccount(null);
+        setHotsUnlockedThisSession(false);
         return;
       }
 
@@ -231,17 +248,28 @@ function XeroTvShell() {
     };
   }, []);
 
-  // Sync mode CSS attribute & dynamic tab favicon
+  // Sync mode CSS attribute, browser theme-color, & dynamic tab favicon
   useEffect(() => {
     document.documentElement.setAttribute('data-mode', mode);
     const favicon = document.getElementById('dynamic-favicon') as HTMLLinkElement | null;
     if (favicon) {
       favicon.href = MODE_CONFIGS[mode].faviconPath;
     }
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      const colorMap: Record<ProfileMode, string> = {
+        main: '#09090b',
+        kids: '#eef6ff',
+        adult: '#0b0608',
+        christmas: '#061510',
+      };
+      themeMeta.setAttribute('content', colorMap[mode]);
+    }
   }, [mode]);
 
-  // Fetch TMDB feed for active mode
+  // Fetch TMDB feed for active mode (immediately clear stale sections on mode switch)
   const loadFeed = useCallback(async (targetMode: ProfileMode) => {
+    setSections([]);
     setLoadingFeed(true);
     setFeedError('');
     try {
@@ -269,11 +297,14 @@ function XeroTvShell() {
   }, [mode, loadFeed]);
 
   // Discover Movies or Series when section tab changes
+  const [discoverRetryCount, setDiscoverRetryCount] = useState(0);
   useEffect(() => {
     if (activeSection !== 'movies' && activeSection !== 'series') return;
     const mediaType = activeSection === 'series' ? 'tv' : 'movie';
     let active = true;
+    setDiscoverItems([]);
     setLoadingFeed(true);
+    setFeedError('');
     cachedTmdbFetch<{ results: MediaItem[] }>(
       `/api/tmdb/discover?mediaType=${mediaType}&mode=${encodeURIComponent(mode)}&genre=${encodeURIComponent(selectedGenre)}`,
       TMDB_CACHE_TTL.MEDIUM,
@@ -282,8 +313,11 @@ function XeroTvShell() {
         if (!active) return;
         setDiscoverItems(filterMediaForMode(data.results || [], mode));
       })
-      .catch(() => {
-        if (active) setDiscoverItems([]);
+      .catch((err) => {
+        if (active) {
+          setDiscoverItems([]);
+          setFeedError(err instanceof Error ? err.message : 'Unable to reach catalog.');
+        }
       })
       .finally(() => {
         if (active) setLoadingFeed(false);
@@ -291,7 +325,7 @@ function XeroTvShell() {
     return () => {
       active = false;
     };
-  }, [activeSection, mode, selectedGenre]);
+  }, [activeSection, mode, selectedGenre, discoverRetryCount]);
 
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -318,11 +352,42 @@ function XeroTvShell() {
     }
   };
 
-  const getSavedPinHash = (kind: 'kids' | 'adult'): string | undefined => {
+  const getSavedPinHash = (kind: 'kids' | 'adult' | 'hots'): string | undefined => {
     if (kind === 'kids') {
       return account?.kidsPinHash || localStorage.getItem('xtv_kids_pin_hash') || undefined;
     }
+    if (kind === 'hots') {
+      return account?.xerohotsPinHash || localStorage.getItem('xtv_hots_pin_hash') || undefined;
+    }
     return account?.adultPinHash || localStorage.getItem('xtv_adult_pin_hash') || undefined;
+  };
+
+  const handleRequestHotsPinUnlock = () => {
+    const hotsHash = getSavedPinHash('hots');
+    setPinPrompt({
+      open: true,
+      title: hotsHash ? 'XeroHots Secret PIN' : 'Create XeroHots PIN',
+      description: hotsHash
+        ? 'Enter your private 4-6 digit XeroHots PIN to unlock this VIP session.'
+        : 'Set a private 4-6 digit PIN to protect your XeroHots VIP channel.',
+      promptMode: hotsHash ? 'verify' : 'create',
+      expectedHash: hotsHash,
+      pinKind: 'hots',
+    });
+  };
+
+  const applyModeTransition = (nextMode: ProfileMode) => {
+    setSelectedMedia(null);
+    setSections([]);
+    setDiscoverItems([]);
+    setSearchResults(null);
+    if (nextMode === 'kids') {
+      setHotsUnlockedThisSession(false);
+      if (activeSection === 'hots') {
+        setActiveSection('home');
+      }
+    }
+    setMode(nextMode);
   };
 
   const handleRequestModeChange = (target: ProfileMode) => {
@@ -384,25 +449,33 @@ function XeroTvShell() {
       return;
     }
 
-    setSelectedMedia(null);
-    setMode(target);
+    applyModeTransition(target);
   };
 
   const handlePinSuccess = async (pinHash: string) => {
     if (!pinPrompt) return;
     if (pinPrompt.promptMode === 'create') {
-      localStorage.setItem(
-        pinPrompt.pinKind === 'kids' ? 'xtv_kids_pin_hash' : 'xtv_adult_pin_hash',
-        pinHash,
-      );
+      const storageKey =
+        pinPrompt.pinKind === 'kids'
+          ? 'xtv_kids_pin_hash'
+          : pinPrompt.pinKind === 'hots'
+            ? 'xtv_hots_pin_hash'
+            : 'xtv_adult_pin_hash';
+      localStorage.setItem(storageKey, pinHash);
       if (user) {
         saveUserPinHash(user.uid, pinPrompt.pinKind, pinHash).catch(() => {});
       }
     }
-    const next = pinPrompt.targetMode;
+    const { pinKind, targetMode, targetSection } = pinPrompt;
     setPinPrompt(null);
-    setSelectedMedia(null);
-    setMode(next);
+    if (pinKind === 'hots') {
+      setHotsUnlockedThisSession(true);
+      if (targetSection) setActiveSection(targetSection);
+      return;
+    }
+    if (targetMode) {
+      applyModeTransition(targetMode);
+    }
   };
 
   const handleVaultChanged = async (newUsedBytes: number) => {
@@ -413,6 +486,7 @@ function XeroTvShell() {
   };
 
   const downloadedKeys = new Set(offlineMovies.map((m) => m.key));
+  const visibleWatchlist = filterMediaForMode(watchlistItems, mode);
   const heroItem = sections[0]?.items?.[0] || null;
   const isKids = mode === 'kids';
   const modeCfg = MODE_CONFIGS[mode];
@@ -488,6 +562,16 @@ function XeroTvShell() {
             mode={mode}
             onOpenVault={() => setActiveSection('vault')}
           />
+        ) : activeSection === 'hots' ? (
+          <XeroHotsView
+            isSignedIn={!!user}
+            account={account}
+            hasPin={!!getSavedPinHash('hots')}
+            isPinUnlocked={hotsUnlockedThisSession}
+            onRequestPinUnlock={handleRequestHotsPinUnlock}
+            onLockNow={() => setHotsUnlockedThisSession(false)}
+            onOpenAccount={() => setAccountOpen(true)}
+          />
         ) : (
           <>
             <ModeSwitcherBar
@@ -525,7 +609,7 @@ function XeroTvShell() {
                       ))}
                     </div>
                   ) : searchResults.length === 0 ? (
-                    <div className="rounded-3xl liquid-glass p-10 text-center space-y-2">
+                    <div className={`rounded-3xl p-10 text-center space-y-2 ${isKids ? 'bg-white border border-sky-200' : 'liquid-glass'}`}>
                       <Film className="w-8 h-8 mx-auto opacity-50" />
                       <p className="text-sm opacity-75">
                         No matching titles found in {modeCfg.label}.
@@ -573,7 +657,11 @@ function XeroTvShell() {
                               active
                                 ? isKids
                                   ? 'bg-sky-600 text-white'
-                                  : 'bg-white text-zinc-950'
+                                  : mode === 'adult'
+                                    ? 'bg-rose-500 text-white'
+                                    : mode === 'christmas'
+                                      ? 'bg-amber-400 text-zinc-950'
+                                      : 'bg-white text-zinc-950'
                                 : isKids
                                   ? 'bg-white border border-sky-200 text-slate-700 hover:bg-sky-50'
                                   : 'liquid-glass text-zinc-300 hover:text-white'
@@ -591,6 +679,22 @@ function XeroTvShell() {
                       {Array.from({ length: 10 }).map((_, idx) => (
                         <div key={idx} className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" />
                       ))}
+                    </div>
+                  ) : discoverItems.length === 0 ? (
+                    <div className={`rounded-2xl p-8 text-center space-y-3 ${isKids ? 'bg-white border border-sky-200' : 'liquid-glass'}`}>
+                      <p className={`text-sm font-medium ${feedError ? 'text-rose-400' : isKids ? 'text-slate-600' : 'text-zinc-300'}`}>
+                        {feedError || 'No titles matched this genre filter right now.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDiscoverRetryCount((c) => c + 1)}
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer ${
+                          isKids ? 'bg-sky-600 text-white' : 'bg-white text-zinc-950'
+                        }`}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Retry Catalog</span>
+                      </button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
@@ -683,7 +787,7 @@ function XeroTvShell() {
                                 playClickFx();
                                 setActiveSection('vault');
                               }}
-                              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl liquid-glass text-white text-sm font-semibold hover:bg-white/15 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-zinc-950/75 border border-white/25 text-white text-sm font-semibold hover:bg-zinc-900/90 transition-colors cursor-pointer"
                             >
                               <HardDriveDownload className="w-4 h-4" />
                               <span>Offline Vault ({offlineMovies.length})</span>
@@ -694,7 +798,7 @@ function XeroTvShell() {
                                 playClickFx();
                                 setActiveSection('docs');
                               }}
-                              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl liquid-glass text-zinc-200 text-xs font-semibold hover:bg-white/15 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-zinc-950/75 border border-white/25 text-zinc-100 text-xs font-semibold hover:bg-zinc-900/90 transition-colors cursor-pointer"
                             >
                               <span>Improving at 1.0</span>
                             </button>
@@ -711,16 +815,53 @@ function XeroTvShell() {
                     onSelectMedia={setSelectedMedia}
                   />
 
+                  {/* mstream Synced Watchlist Shelf */}
+                  {visibleWatchlist.length > 0 && (
+                    <section className="space-y-4" aria-label="My Watchlist">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <Bookmark className="w-5 h-5 opacity-80" />
+                          <h2 className="text-xl sm:text-2xl font-bold font-display">
+                            My Watchlist ({visibleWatchlist.length})
+                          </h2>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickFx();
+                            clearWatchlist();
+                          }}
+                          className={`text-xs font-semibold underline opacity-75 hover:opacity-100 cursor-pointer ${
+                            isKids ? 'text-slate-600' : 'text-zinc-300'
+                          }`}
+                        >
+                          Clear Watchlist
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                        {visibleWatchlist.slice(0, 10).map((item) => (
+                          <MediaCard
+                            key={`wl-${item.media_type || 'movie'}-${item.id}`}
+                            item={item}
+                            mode={mode}
+                            onSelect={setSelectedMedia}
+                            isDownloaded={downloadedKeys.has(`${item.media_type || 'movie'}:${item.id}`)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
                   {/* Feed Error State */}
                   {feedError && (
-                    <div className="rounded-2xl liquid-glass p-6 flex items-center justify-between gap-4">
-                      <p className="text-sm text-rose-400">
+                    <div className={`rounded-2xl p-6 flex items-center justify-between gap-4 ${isKids ? 'bg-white border border-sky-200' : 'liquid-glass'}`}>
+                      <p className="text-sm text-rose-500 font-medium">
                         TMDB Sync Notice: {feedError}
                       </p>
                       <button
                         type="button"
                         onClick={() => loadFeed(mode)}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-zinc-950 text-xs font-semibold cursor-pointer"
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer ${isKids ? 'bg-sky-600 text-white' : 'bg-white text-zinc-950'}`}
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>Retry</span>
@@ -852,9 +993,11 @@ function XeroTvShell() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <DownloadProvider>
-        <XeroTvShell />
-      </DownloadProvider>
+      <WatchlistProvider>
+        <DownloadProvider>
+          <XeroTvShell />
+        </DownloadProvider>
+      </WatchlistProvider>
     </ErrorBoundary>
   );
 }

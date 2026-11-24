@@ -262,7 +262,11 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
               <Film className="w-5 h-5" />
               <h2 className="text-xl font-bold font-display">Improving at 1.0 (Video)</h2>
             </div>
-            <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-white/10">
+            <span
+              className={`text-xs font-mono px-2.5 py-1 rounded-lg ${
+                isKids ? 'bg-sky-100 text-sky-900' : 'bg-white/10'
+              }`}
+            >
               90s MP4 + Sound
             </span>
           </div>
@@ -279,9 +283,15 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
               className="w-full aspect-video object-contain bg-black"
             />
           </div>
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 flex items-center justify-between gap-3 flex-wrap">
+          <div
+            className={`rounded-2xl p-3.5 flex items-center justify-between gap-3 flex-wrap ${
+              isKids
+                ? 'bg-sky-50 border border-sky-200 text-slate-800'
+                : 'bg-white/5 border border-white/10'
+            }`}
+          >
             <div className="flex items-center gap-2 text-xs">
-              <Gift className="w-4 h-4 text-emerald-400" />
+              <Gift className={`w-4 h-4 ${isKids ? 'text-emerald-600' : 'text-emerald-400'}`} />
               <span>
                 Promo Code: <code className="font-mono font-bold">VER-1-0XEROTV</code> (+20 Days &amp; +5GB)
               </span>
@@ -329,7 +339,11 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
           </div>
 
           <div className="space-y-3 text-xs leading-relaxed">
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 space-y-1">
+            <div
+              className={`rounded-2xl p-3.5 space-y-1 ${
+                isKids ? 'bg-sky-50 border border-sky-200 text-slate-800' : 'bg-white/5 border border-white/10'
+              }`}
+            >
               <div className="font-bold text-sm">1. WebApp Shortcuts &amp; Offline Support</div>
               <p className={isKids ? 'text-slate-600' : 'text-zinc-300'}>
                 Open <strong>Get Apps</strong> to install XEROTV as a standalone WebApp shortcut on Desktop, Android, or iOS. Long-press the app icon to jump straight into Offline Vault, Movies, or Docs even while offline.
@@ -339,17 +353,25 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
               </button>
             </div>
 
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 space-y-1">
+            <div
+              className={`rounded-2xl p-3.5 space-y-1 ${
+                isKids ? 'bg-sky-50 border border-sky-200 text-slate-800' : 'bg-white/5 border border-white/10'
+              }`}
+            >
               <div className="font-bold text-sm">2. Subscriptions &amp; Contact Developer</div>
               <p className={isKids ? 'text-slate-600' : 'text-zinc-300'}>
-                Download Access (₱500 / 2 Months) and 1TB Permanent Storage (₱1,090) require sending your unique UserID (<code className="font-mono">XTV-...</code>) directly to XIAN IN PRODUCTION via the Support Developer / Facebook button.
+                Download Access (₱500 / 2 Months), 1TB Permanent Storage (₱1,090), and XEROSTAR VIP (₱150) require sending your unique UserID (<code className="font-mono">XTV-...</code>) directly to XIAN IN PRODUCTION via the Support Developer / Facebook button.
               </p>
             </div>
 
-            <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 space-y-1">
+            <div
+              className={`rounded-2xl p-3.5 space-y-1 ${
+                isKids ? 'bg-sky-50 border border-sky-200 text-slate-800' : 'bg-white/5 border border-white/10'
+              }`}
+            >
               <div className="font-bold text-sm">3. Modes &amp; Christmas Lock</div>
               <p className={isKids ? 'text-slate-600' : 'text-zinc-300'}>
-                Kids Mode enforces a Parental PIN and PG filters; 18+ Vault uses a private Secret PIN; Christmas Mode stays locked until December 25 at 12:00 AM local time.
+                Kids Mode enforces a Parental PIN and PG filters; 18+ Vault &amp; XeroHots use private Secret PINs; Christmas Mode stays locked until December 25 at 12:00 AM local time.
               </p>
             </div>
           </div>
@@ -376,7 +398,9 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
                   ? isKids
                     ? 'bg-sky-600 text-white'
                     : 'bg-white text-zinc-950'
-                  : 'bg-white/10 opacity-75'
+                  : isKids
+                    ? 'bg-sky-50 text-slate-700 hover:bg-sky-100'
+                    : 'bg-white/10 opacity-75'
               }`}
             >
               Rate &amp; Feedback
@@ -392,7 +416,9 @@ export const DocsAndChangelogView: React.FC<DocsAndChangelogViewProps> = ({
                   ? isKids
                     ? 'bg-sky-600 text-white'
                     : 'bg-white text-zinc-950'
-                  : 'bg-white/10 opacity-75'
+                  : isKids
+                    ? 'bg-sky-50 text-slate-700 hover:bg-sky-100'
+                    : 'bg-white/10 opacity-75'
               }`}
             >
               Report a Bug

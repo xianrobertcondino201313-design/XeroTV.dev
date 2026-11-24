@@ -121,12 +121,18 @@ export function handleFirestoreError(
 
 export function isTransientOfflineFirestoreError(error: unknown): boolean {
   if (!error) return false;
-  const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+  const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code.toLowerCase() : '';
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
     code === 'unavailable' ||
+    code === 'deadline-exceeded' ||
+    code === 'aborted' ||
     msg.includes('client is offline') ||
     msg.includes('failed to get document because') ||
+    msg.includes('could not reach') ||
+    msg.includes("backend didn't respond") ||
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
     msg.includes('network')
   );
 }
@@ -135,12 +141,14 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+    if (isTransientOfflineFirestoreError(error)) {
       console.warn('Firestore backend temporarily unreachable; waiting for network recovery.');
     }
   }
 }
 void testConnection();
+
+export { formatFirebaseAuthError, type FormattedAuthError } from '../utils/authError';
 
 export async function signInWithGoogle() {
   return signInWithPopup(auth, googleProvider);
@@ -162,21 +170,25 @@ export async function ensureUserDocuments(user: User): Promise<UserSubscriptionS
     storageQuotaBytes: 0,
     storageUsedBytes: 0,
     redeemedCodes: [],
+    xerostarActive: false,
+    xerostarExpiresAtMs: 0,
   };
 
   let snap = null;
+  let wasOfflineRead = false;
   try {
     snap = await getDoc(userRef);
   } catch (error) {
     if (!isTransientOfflineFirestoreError(error)) {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     }
+    wasOfflineRead = true;
     try {
       snap = await getDocFromCache(userRef);
     } catch {
       snap = null;
     }
-    if (!snap) {
+    if (!snap || !snap.exists()) {
       return fallbackAccount;
     }
   }
@@ -184,7 +196,9 @@ export async function ensureUserDocuments(user: User): Promise<UserSubscriptionS
   if (snap.exists()) {
     return snap.data() as UserSubscriptionState;
   }
-  const batch = writeBatch(db);
+  if (wasOfflineRead) {
+    return fallbackAccount;
+  }
 
   const initialAccount: UserSubscriptionState = {
     uid: user.uid,
@@ -195,30 +209,61 @@ export async function ensureUserDocuments(user: User): Promise<UserSubscriptionS
     storageQuotaBytes: 0,
     storageUsedBytes: 0,
     redeemedCodes: [],
+    xerostarActive: false,
+    xerostarExpiresAtMs: 0,
   };
 
-  batch.set(userRef, {
-    ...initialAccount,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  const safeEmail = (user.email || `${user.uid}@xerotv.user`).slice(0, 256);
+  const safeDisplayName = (user.displayName || 'XEROTV Member').slice(0, 128);
+  const safePhotoUrl =
+    typeof user.photoURL === 'string' && user.photoURL.length > 0 && user.photoURL.length <= 512
+      ? user.photoURL
+      : null;
 
   const privateRef = doc(db, 'users', user.uid, 'private', 'profile');
-  batch.set(privateRef, {
+  const privatePayload = {
     uid: user.uid,
-    email: user.email || `${user.uid}@xerotv.user`,
-    displayName: user.displayName || 'XEROTV Member',
-    ...(user.photoURL ? { photoURL: user.photoURL } : {}),
+    email: safeEmail,
+    displayName: safeDisplayName,
+    ...(safePhotoUrl ? { photoURL: safePhotoUrl } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
 
   const lookupRef = doc(db, 'userLookup', shortUserId);
-  batch.set(lookupRef, {
-    shortUserId,
-    uid: user.uid,
-    createdAt: serverTimestamp(),
-  });
+  let needLookupCreate = true;
+  try {
+    const lookupSnap = await getDoc(lookupRef);
+    if (lookupSnap.exists()) {
+      const existingUid = (lookupSnap.data() as { uid?: string } | undefined)?.uid;
+      if (existingUid === user.uid) {
+        needLookupCreate = false;
+      }
+    }
+  } catch {
+    // non-fatal if lookup check unavailable
+  }
+
+  const buildCoreBatch = () => {
+    const b = writeBatch(db);
+    b.set(userRef, {
+      ...initialAccount,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    b.set(privateRef, privatePayload);
+    if (needLookupCreate) {
+      b.set(lookupRef, {
+        shortUserId,
+        uid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    }
+    return b;
+  };
+
+  const batch = buildCoreBatch();
+  let includedStats = false;
 
   // Atomically update honest registered user counter
   const statsRef = doc(db, 'stats', 'public');
@@ -230,12 +275,14 @@ export async function ensureUserDocuments(user: User): Promise<UserSubscriptionS
         totalEarningsPesos: 0,
         updatedAt: serverTimestamp(),
       });
+      includedStats = true;
     } else {
       const prev = statsSnap.data() as { registeredUsersCount?: number; totalEarningsPesos?: number };
       batch.update(statsRef, {
         registeredUsersCount: (prev.registeredUsersCount || 0) + 1,
         updatedAt: serverTimestamp(),
       });
+      includedStats = true;
     }
   } catch {
     // non-fatal if stats read temporarily offline
@@ -244,12 +291,36 @@ export async function ensureUserDocuments(user: User): Promise<UserSubscriptionS
   try {
     await batch.commit();
   } catch (error) {
-    if (!isTransientOfflineFirestoreError(error)) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+    if (isTransientOfflineFirestoreError(error)) {
+      return initialAccount;
     }
+    if (includedStats) {
+      try {
+        await buildCoreBatch().commit();
+        return initialAccount;
+      } catch (coreError) {
+        if (!isTransientOfflineFirestoreError(coreError)) {
+          handleFirestoreError(coreError, OperationType.WRITE, `users/${user.uid}`);
+        }
+        return initialAccount;
+      }
+    }
+    handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
   }
 
   return initialAccount;
+}
+
+export async function isCurrentUserAdmin(): Promise<boolean> {
+  const current = auth.currentUser;
+  if (!current || !current.emailVerified) return false;
+  if (current.email === 'xianrobertcondino201313@gmail.com') return true;
+  try {
+    const adminDoc = await getDoc(doc(db, 'admins', current.uid));
+    return adminDoc.exists();
+  } catch {
+    return false;
+  }
 }
 
 export async function redeemPromoCodeInFirestore(
@@ -316,13 +387,19 @@ export async function redeemPromoCodeInFirestore(
 
 export async function saveUserPinHash(
   uid: string,
-  kind: 'kids' | 'adult',
+  kind: 'kids' | 'adult' | 'hots',
   pinHash: string,
 ) {
   const userRef = doc(db, 'users', uid);
+  const patch =
+    kind === 'kids'
+      ? { kidsPinHash: pinHash }
+      : kind === 'adult'
+        ? { adultPinHash: pinHash }
+        : { xerohotsPinHash: pinHash };
   try {
     await updateDoc(userRef, {
-      ...(kind === 'kids' ? { kidsPinHash: pinHash } : { adultPinHash: pinHash }),
+      ...patch,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

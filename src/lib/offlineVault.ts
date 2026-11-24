@@ -20,8 +20,11 @@ const DB_NAME = 'xerotv_offline_vault';
 const DB_VERSION = 1;
 const STORE_NAME = 'movies';
 
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openVaultDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -29,9 +32,23 @@ function openVaultDb(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_NAME, { keyPath: 'key' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB vault'));
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => {
+      dbPromise = null;
+      reject(req.error || new Error('Failed to open IndexedDB vault'));
+    };
   });
+  return dbPromise;
 }
 
 async function fetchPosterAsDataUrl(posterPath?: string | null): Promise<string | null> {
@@ -180,12 +197,20 @@ export async function probeDownloadInfo(params: {
   const infoUrl = `/api/download/info?tmdbId=${encodeURIComponent(
     String(params.tmdbId),
   )}&quality=${encodeURIComponent(params.quality)}&title=${encodeURIComponent(params.title)}`;
-  const res = await fetch(infoUrl, { signal: params.signal });
+  const res = await fetch(infoUrl, { signal: params.signal, cache: 'no-store' });
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
   if (!res.ok) {
     const errBody = await res.json().catch(() => null);
     throw new Error(errBody?.error || `Download probe failed with status ${res.status}`);
   }
-  return (await res.json()) as DownloadInfoPayload;
+  if (!ct.includes('application/json')) {
+    throw new Error('Download service returned an unexpected response.');
+  }
+  const payload = (await res.json()) as DownloadInfoPayload;
+  if (!payload || !payload.ok || !Number.isFinite(payload.totalBytes) || payload.totalBytes <= 0) {
+    throw new Error('Download metadata incomplete. Please retry.');
+  }
+  return payload;
 }
 
 async function fetchChunkWithRetry(
@@ -199,11 +224,18 @@ async function fetchChunkWithRetry(
       throw new DOMException('Download cancelled', 'AbortError');
     }
     try {
-      const res = await fetch(url, { signal });
+      const res = await fetch(url, { signal, cache: 'no-store' });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (!res.ok && res.status !== 206) {
         throw new Error(`Download failed with status ${res.status}`);
       }
+      if (ct.includes('text/html') || ct.includes('application/json')) {
+        throw new Error('Stream endpoint returned an error page instead of video data.');
+      }
       const buf = await res.arrayBuffer();
+      if (buf.byteLength === 0) {
+        throw new Error('Received empty video chunk.');
+      }
       return new Uint8Array(buf);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {

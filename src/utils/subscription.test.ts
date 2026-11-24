@@ -9,8 +9,11 @@ import {
   formatBytes,
   generateShortUserId,
   isDownloadAccessActive,
+  isXeroStarActive,
   ONE_GB_BYTES,
   ONE_TB_BYTES,
+  SUBSCRIPTION_PLANS,
+  THIRTY_DAYS_MS,
   TWO_GB_BYTES,
   type UserSubscriptionState,
 } from './subscription';
@@ -109,7 +112,16 @@ test('Admin grant 2 months download, 1TB permanent storage, and honest Peso bill
   assert.equal(calculateGrantAmountPesos('download_2m'), 500);
   assert.equal(calculateGrantAmountPesos('storage_1tb'), 1090);
   assert.equal(calculateGrantAmountPesos('bundle_2m_1tb'), 1590);
+  assert.equal(calculateGrantAmountPesos('xerostar'), 150);
   assert.equal(calculateGrantAmountPesos('revoke'), 0);
+  assert.equal(SUBSCRIPTION_PLANS.XEROSTAR.pricePesos, 150);
+
+  assert.equal(isXeroStarActive(baseUser, now), false);
+  const grantXeroStar = calculateAdminGrantUpdate(baseUser, 'xerostar', 30, now);
+  assert.equal(grantXeroStar.xerostarActive, true);
+  assert.equal(grantXeroStar.xerostarExpiresAtMs, now + THIRTY_DAYS_MS);
+  assert.equal(isXeroStarActive({ ...baseUser, ...grantXeroStar }, now + 1000), true);
+  assert.equal(isXeroStarActive({ ...baseUser, ...grantXeroStar }, now + THIRTY_DAYS_MS + 1000), false);
 });
 
 test('canDownloadMovie blocks free user and insufficient storage', () => {

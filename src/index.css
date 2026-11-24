@@ -8,8 +8,9 @@
     --font-mono: 'JetBrains Mono', monospace;
 
     --canvas-bg: #09090b;
-    --surface-glass: rgba(24, 24, 27, 0.62);
-    --surface-glass-strong: rgba(15, 15, 18, 0.84);
+    --surface-card: rgba(20, 20, 24, 0.88);
+    --surface-glass: rgba(22, 22, 26, 0.86);
+    --surface-glass-strong: rgba(14, 14, 18, 0.92);
     --surface-border: rgba(255, 255, 255, 0.12);
     --text-primary: #fafafa;
     --text-muted: #a1a1aa;
@@ -18,10 +19,11 @@
   }
 
   [data-mode='kids'] {
-    --canvas-bg: #f0f9ff;
-    --surface-glass: rgba(255, 255, 255, 0.84);
-    --surface-glass-strong: rgba(255, 255, 255, 0.94);
-    --surface-border: rgba(14, 165, 233, 0.25);
+    --canvas-bg: #eef6ff;
+    --surface-card: rgba(255, 255, 255, 0.96);
+    --surface-glass: rgba(255, 255, 255, 0.92);
+    --surface-glass-strong: rgba(255, 255, 255, 0.96);
+    --surface-border: rgba(2, 132, 199, 0.22);
     --text-primary: #0f172a;
     --text-muted: #475569;
     --accent-bg: #0284c7;
@@ -29,10 +31,11 @@
   }
 
   [data-mode='adult'] {
-    --canvas-bg: #0c0407;
-    --surface-glass: rgba(34, 9, 17, 0.72);
-    --surface-glass-strong: rgba(24, 5, 11, 0.9);
-    --surface-border: rgba(244, 63, 94, 0.24);
+    --canvas-bg: #0b0608;
+    --surface-card: rgba(26, 12, 18, 0.92);
+    --surface-glass: rgba(30, 12, 20, 0.9);
+    --surface-glass-strong: rgba(20, 8, 13, 0.95);
+    --surface-border: rgba(244, 63, 94, 0.28);
     --text-primary: #fff1f2;
     --text-muted: #fda4af;
     --accent-bg: #e11d48;
@@ -40,10 +43,11 @@
   }
 
   [data-mode='christmas'] {
-    --canvas-bg: #051b14;
-    --surface-glass: rgba(10, 42, 31, 0.7);
-    --surface-glass-strong: rgba(7, 30, 22, 0.9);
-    --surface-border: rgba(248, 250, 252, 0.2);
+    --canvas-bg: #061510;
+    --surface-card: rgba(12, 34, 27, 0.9);
+    --surface-glass: rgba(14, 38, 30, 0.88);
+    --surface-glass-strong: rgba(9, 27, 21, 0.95);
+    --surface-border: rgba(251, 191, 36, 0.24);
     --text-primary: #f8fafc;
     --text-muted: #cbd5e1;
     --accent-bg: #dc2626;
@@ -72,24 +76,31 @@
   }
 }
 
+/* Lightweight frosted surfaces for repeated grid cards (no per-card GPU backdrop blur thrashing) */
 .liquid-glass {
   background: var(--surface-glass);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid var(--surface-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+/* Full GPU-composited backdrop blur reserved strictly for sticky navigation & modals */
+.liquid-glass-strong {
+  background: var(--surface-glass-strong);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
   border: 1px solid var(--surface-border);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 12px 32px rgba(0, 0, 0, 0.28);
+    0 18px 42px rgba(0, 0, 0, 0.42);
 }
 
-.liquid-glass-strong {
-  background: var(--surface-glass-strong);
-  backdrop-filter: blur(28px) saturate(170%);
-  -webkit-backdrop-filter: blur(28px) saturate(170%);
-  border: 1px solid var(--surface-border);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 20px 48px rgba(0, 0, 0, 0.42);
+/* Keep floating white-text dialog modals dark cinema glass even inside light Kids Mode */
+[data-mode='kids'] .liquid-glass-strong.text-white {
+  background: rgba(15, 23, 42, 0.96);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -121,14 +132,11 @@
   animation-name: xerotv-snowfall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
-  will-change: transform, opacity;
 }
 
 .liquid-glass-3d {
   position: relative;
-  transform-style: preserve-3d;
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease;
-  will-change: transform;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease;
 }
 
 .glass-slash-sheen {
@@ -143,12 +151,12 @@
   background: linear-gradient(
     115deg,
     transparent 35%,
-    rgba(255, 255, 255, 0.16) 49%,
-    rgba(255, 255, 255, 0.04) 54%,
+    rgba(255, 255, 255, 0.14) 49%,
+    rgba(255, 255, 255, 0.03) 54%,
     transparent 65%
   );
   transform: translate3d(-110%, 0, 0);
-  transition: transform 680ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
 
@@ -167,4 +175,3 @@
     transition: none !important;
   }
 }
-

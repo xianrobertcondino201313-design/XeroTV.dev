@@ -11,14 +11,13 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         includeAssets: [
           'icon.svg',
           'icon-kids.svg',
           'icon-adult.svg',
           'icon-christmas.svg',
           'apple-touch-icon.png',
-          'media/improving-v1.mp4',
         ],
         manifest: {
           id: '/',
@@ -83,9 +82,11 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,woff,woff2,mp4}'],
-          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          navigateFallbackDenylist: [/^\/api\//, /^\/apps\//, /^\/media\//],
           runtimeCaching: [
             {
               urlPattern: ({ url }) =>

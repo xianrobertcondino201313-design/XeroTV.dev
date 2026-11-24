@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Monitor, Server, Settings, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import { Clock, Globe, Monitor, Server, Settings, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
 import { STREAMING_SERVERS } from '../utils/servers';
-import { loadAppSettings, saveAppSettings, type XeroAppSettings } from '../utils/settings';
+import {
+  formatClockDisplay,
+  loadAppSettings,
+  saveAppSettings,
+  TIMEZONE_OPTIONS,
+  type XeroAppSettings,
+} from '../utils/settings';
 import { playClickFx, playUnlockFx } from '../utils/soundFx';
 
 interface SettingsModalProps {
@@ -35,6 +41,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const previewClock = formatClockDisplay(new Date(), settings.timeFormat, settings.timeZone);
+
   return (
     <div
       role="dialog"
@@ -42,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       aria-labelledby="settings-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md overflow-y-auto"
     >
-      <div className="w-full max-w-lg liquid-glass-strong rounded-3xl p-6 sm:p-7 text-white space-y-6 my-auto border border-white/20">
+      <div className="w-full max-w-lg liquid-glass-strong rounded-3xl p-6 sm:p-7 text-white space-y-5 my-auto max-h-[90vh] overflow-y-auto border border-white/20">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <Settings className="w-5 h-5" />
@@ -109,6 +117,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               {settings.motion3dEnabled ? 'ON' : 'OFF'}
             </button>
+          </div>
+
+          {/* Date, Time & Timezone Configuration */}
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                <span>Clock &amp; Date Time Zone</span>
+              </div>
+              <span className="text-[11px] font-mono text-zinc-300 tabular-nums">
+                {previewClock.timeText} · {previewClock.zoneLabel}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => updatePatch({ timeFormat: '12h' })}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold cursor-pointer ${
+                  settings.timeFormat === '12h' ? 'bg-white text-zinc-950' : 'bg-white/10 text-zinc-300'
+                }`}
+              >
+                12-Hour (AM/PM)
+              </button>
+              <button
+                type="button"
+                onClick={() => updatePatch({ timeFormat: '24h' })}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold cursor-pointer ${
+                  settings.timeFormat === '24h' ? 'bg-white text-zinc-950' : 'bg-white/10 text-zinc-300'
+                }`}
+              >
+                24-Hour Clock
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="settings-timezone" className="text-xs text-zinc-400 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5" />
+                <span>Select Time Zone</span>
+              </label>
+              <select
+                id="settings-timezone"
+                value={settings.timeZone}
+                onChange={(e) => updatePatch({ timeZone: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-white/15 text-sm text-white"
+              >
+                {TIMEZONE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Default Streaming Server */}

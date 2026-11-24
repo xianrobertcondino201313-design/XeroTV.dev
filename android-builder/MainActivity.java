@@ -117,6 +117,7 @@ public class MainActivity extends Activity {
     private WebView createConfiguredWebView() {
         WebView wv = new WebView(this);
         wv.setBackgroundColor(Color.parseColor("#0A0A0C"));
+        wv.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         WebSettings settings = wv.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -129,6 +130,8 @@ public class MainActivity extends Activity {
         settings.setUseWideViewPort(true);
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
+        settings.setSupportMultipleWindows(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         settings.setCacheMode(isNetworkAvailable()
                 ? WebSettings.LOAD_DEFAULT
@@ -203,6 +206,7 @@ public class MainActivity extends Activity {
                 Uri uri = request.getUrl();
                 String urlStr = uri != null ? uri.toString() : "";
                 if (urlStr.contains("facebook.com") || urlStr.contains("fb.me")
+                        || urlStr.contains("console.firebase.google.com")
                         || (!urlStr.startsWith("http://") && !urlStr.startsWith("https://"))) {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, uri));
@@ -217,6 +221,19 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 hideSplash();
+            }
+
+            @Override
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                super.onReceivedError(view, errorCode, description, failingUrl);
+                if (failingUrl != null && failingUrl.equals(localHomeUrl)) {
+                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (webView != null) webView.loadUrl(localHomeUrl);
+                        }
+                    }, 800);
+                }
             }
         });
 

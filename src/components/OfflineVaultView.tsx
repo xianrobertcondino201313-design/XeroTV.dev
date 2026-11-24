@@ -161,7 +161,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
               <button
                 type="button"
                 onClick={handleDeleteWatched}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-rose-400/40 text-rose-300 hover:bg-rose-500/15 text-xs font-semibold cursor-pointer"
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-semibold cursor-pointer ${
+                  isKids
+                    ? 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                    : 'border-rose-400/40 text-rose-300 hover:bg-rose-500/15'
+                }`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete Watched Movies ({watchedCount})</span>
@@ -182,7 +186,7 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
           </div>
         </div>
 
-        <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
+        <div className={`w-full h-2.5 rounded-full overflow-hidden ${isKids ? 'bg-sky-100' : 'bg-white/10'}`}>
           <div
             className={`h-full transition-all duration-300 ${isKids ? 'bg-sky-600' : 'bg-white'}`}
             style={{ width: `${pct}%` }}
@@ -190,7 +194,7 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
         </div>
 
         {cleanupMsg && (
-          <p className="text-xs text-emerald-400 font-medium" role="status">
+          <p className={`text-xs font-medium ${isKids ? 'text-emerald-700' : 'text-emerald-400'}`} role="status">
             {cleanupMsg}
           </p>
         )}
@@ -198,11 +202,15 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
 
       {/* Offline HTML5 Video Player */}
       {playing && (
-        <div className="rounded-3xl overflow-hidden liquid-glass-strong p-4 space-y-3">
+        <div
+          className={`rounded-3xl overflow-hidden p-4 space-y-3 ${
+            isKids ? 'bg-white border border-sky-200 text-slate-900 shadow-sm' : 'liquid-glass-strong'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-bold font-display">{playing.summary.title}</h3>
-              <p className="text-xs text-zinc-400 tabular-nums">
+              <p className={`text-xs tabular-nums ${isKids ? 'text-slate-500' : 'text-zinc-400'}`}>
                 Playing from local device storage · {formatBytes(playing.summary.sizeBytes)}
               </p>
             </div>
@@ -212,7 +220,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                 URL.revokeObjectURL(playing.url);
                 setPlaying(null);
               }}
-              className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold hover:bg-white/20 cursor-pointer"
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                isKids
+                  ? 'bg-sky-100 text-sky-900 hover:bg-sky-200'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
             >
               Close Player
             </button>
@@ -272,7 +284,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="text-base font-bold font-display truncate">{rec.title}</h3>
                       {rec.watched && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 shrink-0">
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${
+                            isKids ? 'text-emerald-600' : 'text-emerald-400'
+                          }`}
+                        >
                           <CheckCircle2 className="w-3 h-3" />
                           <span>Watched</span>
                         </span>
@@ -306,8 +322,12 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                       aria-label={rec.watched ? `Unmark ${rec.title} as watched` : `Mark ${rec.title} as watched`}
                       className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                         rec.watched
-                          ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
-                          : 'border-white/15 text-zinc-300 hover:bg-white/10'
+                          ? isKids
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            : 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                          : isKids
+                            ? 'border-sky-200 text-slate-600 hover:bg-sky-50'
+                            : 'border-white/15 text-zinc-300 hover:bg-white/10'
                       }`}
                     >
                       <Eye className="w-4 h-4" />
@@ -317,7 +337,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                       onClick={() => handleExportMp4(rec)}
                       aria-label={`Save ${rec.title} MP4 to device`}
                       title="Save MP4 file"
-                      className="p-2 rounded-xl border border-white/15 text-zinc-200 hover:bg-white/10 cursor-pointer"
+                      className={`p-2 rounded-xl border cursor-pointer ${
+                        isKids
+                          ? 'border-sky-200 text-slate-700 hover:bg-sky-50'
+                          : 'border-white/15 text-zinc-200 hover:bg-white/10'
+                      }`}
                     >
                       <Download className="w-4 h-4" />
                     </button>
@@ -325,7 +349,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                       type="button"
                       onClick={() => handleDelete(rec.key)}
                       aria-label={`Delete ${rec.title}`}
-                      className="p-2 rounded-xl border border-white/15 text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                      className={`p-2 rounded-xl border cursor-pointer ${
+                        isKids
+                          ? 'border-rose-200 text-rose-600 hover:bg-rose-50'
+                          : 'border-white/15 text-rose-400 hover:bg-rose-500/10'
+                      }`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

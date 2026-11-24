@@ -1,5 +1,6 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import * as cheerio from 'cheerio';
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -8,8 +9,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_SHARED_APP_URL =
-  'https://ais-pre-kjqsaa2zuutrws532d2e33-328965355805.asia-east1.run.app';
+const DEFAULT_SHARED_APP_URL = 'https://xerotv.vercel.app';
 
 function normalizeFallbackUrl(raw: string): string {
   try {
@@ -116,10 +116,10 @@ const ADMIN_SECRET_SIGNING_KEY = crypto
   .digest();
 
 const OPEN_CINEMA_STREAMS_HD = [
+  'https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4',
   'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4',
   'https://archive.org/download/ElephantsDream/ed_hd_512kb.mp4',
-  'https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4',
-  'https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4',
+  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
 ];
 
 const OPEN_CINEMA_STREAMS_COMPACT = [
@@ -129,21 +129,61 @@ const OPEN_CINEMA_STREAMS_COMPACT = [
   'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4',
 ];
 
+const LOCAL_FALLBACK_MIRROR_INDEX = 999;
 const MAX_CHUNK_BYTES = 1572864; // 1.5 MB per HTTP request (safe for Vercel 4.5MB & Cloud Run 32MB limits)
 
-const STUDIO_QUERIES: Record<
-  string,
-  { name: string; mediaType: 'movie' | 'tv'; params: Record<string, string | number> }
-> = {
-  netflix: { name: 'Netflix', mediaType: 'tv', params: { with_networks: '213', sort_by: 'popularity.desc' } },
-  disney: { name: 'Disney+', mediaType: 'tv', params: { with_networks: '2739', sort_by: 'popularity.desc' } },
-  hbo: { name: 'HBO / Max', mediaType: 'tv', params: { with_networks: '49|3186', sort_by: 'popularity.desc' } },
-  apple: { name: 'Apple TV+', mediaType: 'tv', params: { with_networks: '2552', sort_by: 'popularity.desc' } },
-  prime: { name: 'Prime Video', mediaType: 'tv', params: { with_networks: '1024', sort_by: 'popularity.desc' } },
-  marvel: { name: 'Marvel Studios', mediaType: 'movie', params: { with_companies: '420', sort_by: 'popularity.desc' } },
-  pixar: { name: 'Pixar', mediaType: 'movie', params: { with_companies: '3', sort_by: 'popularity.desc' } },
-  warner: { name: 'Warner Bros.', mediaType: 'movie', params: { with_companies: '174', sort_by: 'popularity.desc' } },
-  a24: { name: 'A24', mediaType: 'movie', params: { with_companies: '41077', sort_by: 'popularity.desc' } },
+interface StudioQueryConfig {
+  name: string;
+  movieParams?: Record<string, string | number>;
+  tvParams?: Record<string, string | number>;
+}
+
+const STUDIO_QUERIES: Record<string, StudioQueryConfig> = {
+  netflix: {
+    name: 'Netflix',
+    tvParams: { with_networks: '213', sort_by: 'popularity.desc' },
+    movieParams: { with_watch_providers: '8', watch_region: 'US', sort_by: 'popularity.desc' },
+  },
+  disney: {
+    name: 'Disney+',
+    tvParams: { with_networks: '2739', sort_by: 'popularity.desc' },
+    movieParams: { with_watch_providers: '337', watch_region: 'US', sort_by: 'popularity.desc' },
+  },
+  hbo: {
+    name: 'HBO / Max',
+    tvParams: { with_networks: '49|3186', sort_by: 'popularity.desc' },
+    movieParams: { with_watch_providers: '1899|384', watch_region: 'US', sort_by: 'popularity.desc' },
+  },
+  apple: {
+    name: 'Apple TV+',
+    tvParams: { with_networks: '2552', sort_by: 'popularity.desc' },
+    movieParams: { with_watch_providers: '350', watch_region: 'US', sort_by: 'popularity.desc' },
+  },
+  prime: {
+    name: 'Prime Video',
+    tvParams: { with_networks: '1024', sort_by: 'popularity.desc' },
+    movieParams: { with_watch_providers: '9|119', watch_region: 'US', sort_by: 'popularity.desc' },
+  },
+  marvel: {
+    name: 'Marvel Studios',
+    movieParams: { with_companies: '420', sort_by: 'popularity.desc' },
+    tvParams: { with_companies: '420|13252', sort_by: 'popularity.desc' },
+  },
+  pixar: {
+    name: 'Pixar',
+    movieParams: { with_companies: '3', sort_by: 'popularity.desc' },
+    tvParams: { with_companies: '3', sort_by: 'popularity.desc' },
+  },
+  warner: {
+    name: 'Warner Bros.',
+    movieParams: { with_companies: '174', sort_by: 'popularity.desc' },
+    tvParams: { with_companies: '1957|174', sort_by: 'popularity.desc' },
+  },
+  a24: {
+    name: 'A24',
+    movieParams: { with_companies: '41077', sort_by: 'popularity.desc' },
+    tvParams: { with_companies: '41077', sort_by: 'popularity.desc' },
+  },
 };
 
 function parseContentRangeTotal(headerValue: string | null): number {
@@ -154,9 +194,46 @@ function parseContentRangeTotal(headerValue: string | null): number {
   return Number.isFinite(total) && total > 0 ? total : 0;
 }
 
+async function probeSingleStreamMirror(
+  url: string,
+  mirrorIndex: number,
+  timeoutMs: number,
+): Promise<{ url: string; mirrorIndex: number; totalBytes: number; contentType: string }> {
+  const probe = await fetch(url, {
+    redirect: 'follow',
+    headers: { Range: 'bytes=0-0' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const contentType = (probe.headers.get('content-type') || 'video/mp4').toLowerCase();
+  if ((!probe.ok && probe.status !== 206) || contentType.includes('text/html') || contentType.includes('application/json')) {
+    await probe.body?.cancel().catch(() => {});
+    throw new Error(`Invalid stream mirror (${probe.status})`);
+  }
+  const totalFromRange = parseContentRangeTotal(probe.headers.get('content-range'));
+  const totalFromLength = Number(probe.headers.get('content-length') || 0);
+  const totalBytes = totalFromRange || (probe.status === 200 ? totalFromLength : 0);
+  await probe.body?.cancel().catch(() => {});
+  if (totalBytes <= 0) {
+    throw new Error('Zero byte length');
+  }
+  return { url, mirrorIndex, totalBytes, contentType: 'video/mp4' };
+}
+
+function getLocalImprovingMp4Path(): string | null {
+  const videoPath = path.resolve(process.cwd(), 'public', 'media', 'improving-v1.mp4');
+  return fs.existsSync(videoPath) ? videoPath : null;
+}
+
+interface CachedStreamMeta {
+  value: { url: string; mirrorIndex: number; totalBytes: number; contentType: string };
+  expiresAt: number;
+}
+const streamMetaCache = new Map<string, CachedStreamMeta>();
+
 async function resolveWorkingStreamMeta(
   tmdbId: number,
   quality: string,
+  reqOrigin?: string,
   preferredMirror?: number,
 ): Promise<{ url: string; mirrorIndex: number; totalBytes: number; contentType: string } | null> {
   const pool = quality === 'hd' ? OPEN_CINEMA_STREAMS_HD : OPEN_CINEMA_STREAMS_COMPACT;
@@ -165,31 +242,63 @@ async function resolveWorkingStreamMeta(
       ? preferredMirror % pool.length
       : tmdbId % pool.length;
 
-  for (let offset = 0; offset < pool.length; offset++) {
-    const mirrorIndex = (startIdx + offset) % pool.length;
-    const url = pool[mirrorIndex];
-    try {
-      const probe = await fetch(url, {
-        redirect: 'follow',
-        headers: { Range: 'bytes=0-0' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!probe.ok && probe.status !== 206) {
-        await probe.body?.cancel().catch(() => {});
-        continue;
-      }
-      const totalFromRange = parseContentRangeTotal(probe.headers.get('content-range'));
-      const totalFromLength = Number(probe.headers.get('content-length') || 0);
-      const totalBytes = totalFromRange || (probe.status === 200 ? totalFromLength : 0);
-      const contentType = probe.headers.get('content-type') || 'video/mp4';
-      await probe.body?.cancel().catch(() => {});
-      if (totalBytes > 0) {
-        return { url, mirrorIndex, totalBytes, contentType };
-      }
-    } catch {
-      // try next mirror
+  const cacheKey = `${quality}:${startIdx}`;
+  const cached = streamMetaCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const ordered = pool.map((_, offset) => {
+    const idx = (startIdx + offset) % pool.length;
+    return { idx, url: pool[idx] };
+  });
+
+  // Fast 2.2s primary race so Vercel never hits serverless timeouts
+  try {
+    const found = await Promise.any(
+      ordered.slice(0, 2).map((item) => probeSingleStreamMirror(item.url, item.idx, 2200)),
+    );
+    streamMetaCache.set(cacheKey, { value: found, expiresAt: Date.now() + 90_000 });
+    return found;
+  } catch {
+    // try remaining remote mirrors quickly
+  }
+
+  try {
+    const found = await Promise.any(
+      ordered.slice(2).map((item) => probeSingleStreamMirror(item.url, item.idx, 2500)),
+    );
+    streamMetaCache.set(cacheKey, { value: found, expiresAt: Date.now() + 90_000 });
+    return found;
+  } catch {
+    // final local MP4 asset fallback (never 502s)
+  }
+
+  const localPath = getLocalImprovingMp4Path();
+  if (localPath) {
+    const stat = fs.statSync(localPath);
+    if (stat.size > 0) {
+      return {
+        url: localPath,
+        mirrorIndex: LOCAL_FALLBACK_MIRROR_INDEX,
+        totalBytes: stat.size,
+        contentType: 'video/mp4',
+      };
     }
   }
+
+  if (reqOrigin && /^https?:\/\//i.test(reqOrigin)) {
+    try {
+      return await probeSingleStreamMirror(
+        `${reqOrigin.replace(/\/+$/, '')}/media/improving-v1.mp4`,
+        LOCAL_FALLBACK_MIRROR_INDEX,
+        3000,
+      );
+    } catch {
+      // give up cleanly
+    }
+  }
+
   return null;
 }
 
@@ -224,33 +333,69 @@ function getTmdbAuth(): { token: string; apiKey: string } {
   };
 }
 
+interface TmdbServerCacheEntry {
+  data: unknown;
+  expiresAt: number;
+}
+const tmdbServerCache = new Map<string, TmdbServerCacheEntry>();
+const tmdbInFlight = new Map<string, Promise<unknown>>();
+
 async function tmdbFetch<T = unknown>(
   endpoint: string,
   params: Record<string, string | number | boolean> = {},
+  ttlMs: number = 5 * 60 * 1000,
 ): Promise<T> {
   const { token, apiKey } = getTmdbAuth();
   const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
   url.searchParams.set('language', 'en-US');
-  for (const [k, v] of Object.entries(params)) {
+  const sortedEntries = Object.entries(params).sort(([a], [b]) => a.localeCompare(b));
+  for (const [k, v] of sortedEntries) {
     url.searchParams.set(k, String(v));
   }
+  const cacheKey = url.toString();
+
+  const cached = tmdbServerCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data as T;
+  }
+
+  const inflight = tmdbInFlight.get(cacheKey);
+  if (inflight) {
+    return inflight as Promise<T>;
+  }
+
   if (!token) {
     url.searchParams.set('api_key', apiKey);
   }
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Accept: 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal: AbortSignal.timeout(12000),
-  });
+  const reqPromise = (async () => {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(10000),
+    });
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`TMDB API ${res.status}: ${body.slice(0, 200)}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`TMDB API ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const json = (await res.json()) as T;
+    if (tmdbServerCache.size > 300) {
+      const oldestKey = tmdbServerCache.keys().next().value;
+      if (oldestKey) tmdbServerCache.delete(oldestKey);
+    }
+    tmdbServerCache.set(cacheKey, { data: json, expiresAt: Date.now() + ttlMs });
+    return json;
+  })();
+
+  tmdbInFlight.set(cacheKey, reqPromise);
+  try {
+    return await reqPromise;
+  } finally {
+    tmdbInFlight.delete(cacheKey);
   }
-  return (await res.json()) as T;
 }
 
 function createAdminToken(): string {
@@ -349,20 +494,29 @@ export function createApiApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  // Normalize URL if a Vercel proxy rewrite forwards a path without the /api prefix
-  if (process.env.VERCEL) {
-    app.use((req: Request, _res: Response, next: NextFunction) => {
-      const qIdx = req.url.indexOf('?');
-      const querySuffix = qIdx >= 0 ? req.url.slice(qIdx) : '';
-      const pathname = qIdx >= 0 ? req.url.slice(0, qIdx) : req.url;
-      if (pathname === '/' || pathname === '/api' || pathname === '/api/index' || pathname === '/api/index.ts') {
-        req.url = `/api/health${querySuffix}`;
-      } else if (pathname && !pathname.startsWith('/api/')) {
-        req.url = `/api${pathname.startsWith('/') ? '' : '/'}${pathname}${querySuffix}`;
+  // Normalize Vercel-rewritten /api/index?__xero_path=$1 requests without altering SPA/static paths
+  app.use('/api', (req: Request, _res: Response, next: NextFunction) => {
+    try {
+      const parsed = new URL(req.url, 'http://localhost');
+      const xeroPath = parsed.searchParams.get('__xero_path');
+      if (xeroPath !== null) {
+        parsed.searchParams.delete('__xero_path');
+        const cleaned = xeroPath.replace(/^\/+/, '').replace(/^api\/+/, '');
+        const qs = parsed.searchParams.toString();
+        req.url = `/${cleaned || 'health'}${qs ? `?${qs}` : ''}`;
+      } else if (
+        parsed.pathname === '/' ||
+        parsed.pathname === '/index' ||
+        parsed.pathname === '/index.ts'
+      ) {
+        const qs = parsed.searchParams.toString();
+        req.url = `/health${qs ? `?${qs}` : ''}`;
       }
-      next();
-    });
-  }
+    } catch {
+      // keep req.url unchanged on malformed URL
+    }
+    next();
+  });
 
   // Anti-Exploit Security Headers
   app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -503,12 +657,19 @@ export function createApiApp() {
   // ---------------------------------------------------------------------------
   // TMDB Real Catalog Endpoints
   // ---------------------------------------------------------------------------
+  // Edge/CDN cache headers on TMDB metadata for instant page switches & zero lag
+  app.use('/api/tmdb', (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'public, max-age=180, s-maxage=300, stale-while-revalidate=600');
+    next();
+  });
+
   app.get('/api/tmdb/feed', async (req: Request, res: Response) => {
     const mode = String(req.query.mode || 'main');
     const page = Math.max(1, Math.min(20, Number(req.query.page || 1) || 1));
 
     try {
       if (mode === 'kids') {
+        const kidsBlocked = new Set([27, 53, 80, 10752, 10768, 9648]);
         const [movies, animated, familyTv] = await Promise.all([
           tmdbFetch<{ results: Record<string, unknown>[] }>('/discover/movie', {
             page,
@@ -516,12 +677,16 @@ export function createApiApp() {
             certification_country: 'US',
             'certification.lte': 'PG',
             with_genres: '16|10751',
+            without_genres: '27,53,80,10752,10768,9648',
             sort_by: 'popularity.desc',
           }),
           tmdbFetch<{ results: Record<string, unknown>[] }>('/discover/movie', {
             page,
             include_adult: false,
+            certification_country: 'US',
+            'certification.lte': 'PG',
             with_genres: '16',
+            without_genres: '27,53,80,10752,10768,9648',
             'vote_count.gte': 50,
             sort_by: 'vote_average.desc',
           }),
@@ -529,12 +694,19 @@ export function createApiApp() {
             page,
             include_adult: false,
             with_genres: '10762,16',
+            without_genres: '27,53,80,10752,10768,9648',
             sort_by: 'popularity.desc',
           }),
         ]);
 
         const tag = (list: Record<string, unknown>[], media_type: 'movie' | 'tv') =>
-          (list || []).map((item) => ({ ...item, media_type }));
+          (list || [])
+            .filter(
+              (item) =>
+                !item.adult &&
+                !(Array.isArray(item.genre_ids) && item.genre_ids.some((g) => kidsBlocked.has(Number(g)))),
+            )
+            .map((item) => ({ ...item, media_type }));
 
         return res.json({
           mode,
@@ -700,9 +872,12 @@ export function createApiApp() {
       };
       if (genre) params.with_genres = genre;
       if (mode === 'kids') {
-        params.certification_country = 'US';
-        params['certification.lte'] = 'PG';
-        if (!genre) params.with_genres = mediaType === 'tv' ? '10762,16' : '16,10751';
+        // Avoid passing invalid certification.lte on /discover/tv (causes 0 TV results on TMDB)
+        if (mediaType === 'movie') {
+          params.certification_country = 'US';
+          params['certification.lte'] = 'PG';
+        }
+        if (!genre) params.with_genres = mediaType === 'tv' ? '10762|16|10751' : '16|10751';
       }
       if (mode === 'christmas') {
         params.with_keywords = '207317';
@@ -728,9 +903,13 @@ export function createApiApp() {
     }
 
     try {
-      const data = await tmdbFetch<Record<string, unknown>>(`/${mediaType}/${id}`, {
-        append_to_response: 'credits,videos,recommendations,similar,release_dates,content_ratings',
-      });
+      const data = await tmdbFetch<Record<string, unknown>>(
+        `/${mediaType}/${id}`,
+        {
+          append_to_response: 'credits,videos,recommendations,similar,release_dates,content_ratings',
+        },
+        15 * 60 * 1000,
+      );
       res.json({ ...data, media_type: mediaType });
     } catch (error) {
       res.status(502).json({
@@ -748,7 +927,7 @@ export function createApiApp() {
     }
 
     try {
-      const data = await tmdbFetch(`/tv/${tvId}/season/${seasonNumber}`);
+      const data = await tmdbFetch(`/tv/${tvId}/season/${seasonNumber}`, {}, 15 * 60 * 1000);
       res.json(data);
     } catch (error) {
       res.status(502).json({
@@ -761,6 +940,7 @@ export function createApiApp() {
   app.get('/api/tmdb/studios', async (req: Request, res: Response) => {
     const studioId = String(req.query.studio || 'netflix').toLowerCase();
     const mode = String(req.query.mode || 'main');
+    const typeFilter = String(req.query.type || 'all').toLowerCase(); // all | movie | tv
     const page = Math.max(1, Math.min(10, Number(req.query.page || 1) || 1));
 
     const studioCfg = STUDIO_QUERIES[studioId];
@@ -769,25 +949,90 @@ export function createApiApp() {
     }
 
     try {
-      const params: Record<string, string | number | boolean> = {
-        ...studioCfg.params,
-        page,
-        include_adult: mode === 'adult',
-      };
-      if (mode === 'kids') {
-        params.certification_country = 'US';
-        params['certification.lte'] = 'PG';
-      }
-      const data = await tmdbFetch<{ results: Record<string, unknown>[] }>(`/discover/${studioCfg.mediaType}`, params);
-      const items = (data.results || []).map((item) => ({
+      const wantMovies = typeFilter !== 'tv' && Boolean(studioCfg.movieParams);
+      const wantTv = typeFilter !== 'movie' && Boolean(studioCfg.tvParams);
+
+      const emptyDiscover = { results: [] as Record<string, unknown>[] };
+      const moviePromise = wantMovies
+        ? tmdbFetch<{ results: Record<string, unknown>[] }>('/discover/movie', {
+            ...studioCfg.movieParams!,
+            page,
+            include_adult: mode === 'adult',
+            ...(mode === 'kids'
+              ? {
+                  certification_country: 'US',
+                  'certification.lte': 'PG',
+                  with_genres: '16|10751|12|35|14',
+                  without_genres: '27,53,80,10752,10768,9648',
+                }
+              : {}),
+          }).catch(() => emptyDiscover)
+        : Promise.resolve(emptyDiscover);
+
+      const tvPromise = wantTv
+        ? tmdbFetch<{ results: Record<string, unknown>[] }>('/discover/tv', {
+            ...studioCfg.tvParams!,
+            page,
+            include_adult: mode === 'adult',
+            ...(mode === 'kids'
+              ? {
+                  with_genres: '10762|16|10751',
+                  without_genres: '27,53,80,10752,10768,9648',
+                }
+              : {}),
+          }).catch(() => emptyDiscover)
+        : Promise.resolve(emptyDiscover);
+
+      const [movieData, tvData] = await Promise.all([moviePromise, tvPromise]);
+
+      let movieItems: Record<string, unknown>[] = (movieData.results || []).map((item) => ({
         ...item,
-        media_type: studioCfg.mediaType,
+        media_type: 'movie' as const,
       }));
+      let tvItems: Record<string, unknown>[] = (tvData.results || []).map((item) => ({
+        ...item,
+        media_type: 'tv' as const,
+      }));
+
+      if (mode === 'kids') {
+        const blocked = new Set([27, 53, 80, 10752, 10768, 9648]);
+        const kidsSafe = (item: Record<string, unknown>) =>
+          !item.adult &&
+          !(Array.isArray(item.genre_ids) && item.genre_ids.some((g) => blocked.has(Number(g))));
+        movieItems = movieItems.filter(kidsSafe);
+        tvItems = tvItems.filter(kidsSafe);
+      }
+
+      // Interleave movies and series cleanly so both are well-represented at top of shelf
+      const combined: Record<string, unknown>[] = [];
+      const seen = new Set<string>();
+      const maxLen = Math.max(movieItems.length, tvItems.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (i < movieItems.length) {
+          const m = movieItems[i];
+          const k = `movie:${String(m.id)}`;
+          if (!seen.has(k)) {
+            seen.add(k);
+            combined.push(m);
+          }
+        }
+        if (i < tvItems.length) {
+          const t = tvItems[i];
+          const k = `tv:${String(t.id)}`;
+          if (!seen.has(k)) {
+            seen.add(k);
+            combined.push(t);
+          }
+        }
+      }
+
       res.json({
         studio: studioId,
         name: studioCfg.name,
-        mediaType: studioCfg.mediaType,
-        results: items,
+        mediaType: typeFilter === 'movie' || typeFilter === 'tv' ? typeFilter : 'mixed',
+        movieCount: movieItems.length,
+        tvCount: tvItems.length,
+        results: combined,
       });
     } catch (error) {
       res.status(502).json({
@@ -827,7 +1072,8 @@ export function createApiApp() {
         .replace(/[^a-zA-Z0-9_-]+/g, '-')
         .slice(0, 48);
 
-      const meta = await resolveWorkingStreamMeta(tmdbId, quality);
+      const origin = `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+      const meta = await resolveWorkingStreamMeta(tmdbId, quality, origin);
       if (!meta) {
         return res.status(502).json({
           error: 'No upstream video mirror is currently reachable. Please try again in a moment.',
@@ -875,6 +1121,45 @@ export function createApiApp() {
         ? String(req.headers.range)
         : undefined;
 
+    // Serve bundled MP4 cleanly when local fallback mirror is selected
+    if (mirrorIndexParam === LOCAL_FALLBACK_MIRROR_INDEX) {
+      const localPath = getLocalImprovingMp4Path();
+      if (localPath) {
+        const fileSize = fs.statSync(localPath).size;
+        const start = rangeHeader ? startByte : 0;
+        const end = rangeHeader ? Math.min(fileSize - 1, cappedEnd || fileSize - 1) : fileSize - 1;
+        const chunkLen = Math.max(1, end - start + 1);
+        res.status(rangeHeader ? 206 : 200);
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Content-Length', String(chunkLen));
+        if (rangeHeader) {
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+        }
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Disposition', `inline; filename="${title}-${tmdbId}.mp4"`);
+        res.setHeader('Cache-Control', 'no-store');
+        return fs.createReadStream(localPath, { start, end }).pipe(res);
+      }
+      const fallbackUrl = `${resolvePublicOrigin(req)}/media/improving-v1.mp4`;
+      const upstreamLocal = await fetch(fallbackUrl, {
+        redirect: 'follow',
+        headers: rangeHeader ? { Range: rangeHeader } : undefined,
+        signal: AbortSignal.timeout(12000),
+      }).catch(() => null);
+      if (upstreamLocal && (upstreamLocal.ok || upstreamLocal.status === 206) && upstreamLocal.body) {
+        const buf = Buffer.from(await upstreamLocal.arrayBuffer());
+        res.status(upstreamLocal.status);
+        res.setHeader('Content-Type', upstreamLocal.headers.get('content-type') || 'video/mp4');
+        res.setHeader('Content-Length', String(buf.byteLength));
+        const cr = upstreamLocal.headers.get('content-range');
+        if (cr) res.setHeader('Content-Range', cr);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Disposition', `inline; filename="${title}-${tmdbId}.mp4"`);
+        res.setHeader('Cache-Control', 'no-store');
+        return res.send(buf);
+      }
+    }
+
     const pool = quality === 'hd' ? OPEN_CINEMA_STREAMS_HD : OPEN_CINEMA_STREAMS_COMPACT;
     const baseIdx =
       typeof mirrorIndexParam === 'number' && Number.isFinite(mirrorIndexParam) && mirrorIndexParam >= 0
@@ -900,10 +1185,16 @@ export function createApiApp() {
         const attemptRes = await fetch(candidateUrl, {
           redirect: 'follow',
           headers: rangeHeader ? { Range: rangeHeader } : undefined,
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(12000),
         }).catch(() => null);
 
-        if (attemptRes && (attemptRes.ok || attemptRes.status === 206)) {
+        const ct = (attemptRes?.headers.get('content-type') || '').toLowerCase();
+        if (
+          attemptRes &&
+          (attemptRes.ok || attemptRes.status === 206) &&
+          !ct.includes('text/html') &&
+          !ct.includes('application/json')
+        ) {
           upstream = attemptRes;
           break;
         }
@@ -911,7 +1202,34 @@ export function createApiApp() {
       }
 
       if (!upstream) {
-        return res.status(502).json({ error: 'All upstream video mirrors failed or timed out' });
+        const localPath = getLocalImprovingMp4Path();
+        if (localPath) {
+          const fileSize = fs.statSync(localPath).size;
+          const start = rangeHeader ? startByte : 0;
+          const end = rangeHeader ? Math.min(fileSize - 1, cappedEnd || fileSize - 1) : fileSize - 1;
+          const chunkLen = Math.max(1, end - start + 1);
+          res.status(rangeHeader ? 206 : 200);
+          res.setHeader('Content-Type', 'video/mp4');
+          res.setHeader('Content-Length', String(chunkLen));
+          if (rangeHeader) {
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+          }
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Content-Disposition', `inline; filename="${title}-${tmdbId}.mp4"`);
+          res.setHeader('Cache-Control', 'no-store');
+          return fs.createReadStream(localPath, { start, end }).pipe(res);
+        }
+        const fallbackUrl = `${resolvePublicOrigin(req)}/media/improving-v1.mp4`;
+        const publicFallback = await fetch(fallbackUrl, {
+          redirect: 'follow',
+          headers: rangeHeader ? { Range: rangeHeader } : undefined,
+          signal: AbortSignal.timeout(8000),
+        }).catch(() => null);
+        if (publicFallback && (publicFallback.ok || publicFallback.status === 206) && publicFallback.body) {
+          upstream = publicFallback;
+        } else {
+          return res.status(502).json({ error: 'All upstream video mirrors failed or timed out' });
+        }
       }
 
       const contentType = upstream.headers.get('content-type') || 'video/mp4';
@@ -1672,6 +1990,7 @@ Output APK: \`out/XEROTV.apk\`
       res.setHeader('Content-Type', 'application/vnd.android.package-archive');
       res.setHeader('Content-Disposition', 'attachment; filename="XEROTV.apk"');
       res.setHeader('Content-Length', String(stat.size));
+      res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Cache-Control', 'no-store');
       return fs.createReadStream(apkToServe).pipe(res);
     } catch (error) {
@@ -1680,6 +1999,7 @@ Output APK: \`out/XEROTV.apk\`
         res.setHeader('Content-Type', 'application/vnd.android.package-archive');
         res.setHeader('Content-Disposition', 'attachment; filename="XEROTV.apk"');
         res.setHeader('Content-Length', String(stat.size));
+        res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'no-store');
         return fs.createReadStream(prebuiltApk).pipe(res);
       }
@@ -1782,6 +2102,227 @@ Output APK: \`out/XEROTV.apk\`
     res.send(mobileConfigXml);
   });
 
+  // ---------------------------------------------------------------------------
+  // XeroHots AdultColony-API Integration (XEROSTAR VIP ₱150)
+  // ---------------------------------------------------------------------------
+  interface XeroHotsVideo {
+    id: string;
+    title: string;
+    duration: string;
+    views: string;
+    rating: string;
+    thumbnail: string;
+    embedUrl: string;
+    sourceUrl: string;
+    provider: 'eporner' | 'xvideos' | 'pornhub';
+    uploader: string;
+  }
+
+  const xeroHotsCache = new Map<string, { items: XeroHotsVideo[]; expiresAt: number }>();
+
+  const HOTS_BROWSER_HEADERS = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+
+  async function fetchEpornerAdultColony(q: string, page: number): Promise<XeroHotsVideo[]> {
+    const query = (q || 'trending').trim() || 'trending';
+    const url = `https://www.eporner.com/api/v2/video/search/?query=${encodeURIComponent(
+      query,
+    )}&per_page=18&page=${page}&thumbsize=big&order=top-weekly&format=json`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', ...HOTS_BROWSER_HEADERS },
+      signal: AbortSignal.timeout(4800),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      videos?: Array<{
+        id?: string;
+        title?: string;
+        length_min?: string;
+        views?: number;
+        rate?: string;
+        default_thumb?: { src?: string };
+        embed?: string;
+        url?: string;
+      }>;
+    };
+    return (data.videos || [])
+      .filter((v) => v.id && v.title && v.default_thumb?.src)
+      .map((v) => ({
+        id: String(v.id),
+        title: String(v.title),
+        duration: v.length_min || 'HD',
+        views: typeof v.views === 'number' ? v.views.toLocaleString() : '—',
+        rating: v.rate && Number(v.rate) > 0 ? `${v.rate}/5` : 'HD',
+        thumbnail: String(v.default_thumb?.src || ''),
+        embedUrl: `https://www.eporner.com/embed/${encodeURIComponent(String(v.id))}/`,
+        sourceUrl: String(v.url || `https://www.eporner.com/video-${v.id}/`),
+        provider: 'eporner' as const,
+        uploader: 'Eporner HD',
+      }));
+  }
+
+  async function fetchXvideosAdultColony(q: string, page: number): Promise<XeroHotsVideo[]> {
+    const term = (q || '').trim();
+    const url = term
+      ? `https://www.xvideos.com/?k=${encodeURIComponent(term)}&p=${Math.max(0, page - 1)}`
+      : page > 1
+        ? `https://www.xvideos.com/new/${page}`
+        : 'https://www.xvideos.com/?k=trending';
+    const res = await fetch(url, {
+      headers: HOTS_BROWSER_HEADERS,
+      signal: AbortSignal.timeout(4800),
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const items: XeroHotsVideo[] = [];
+    $('div.mozaique div.thumb-block').each((_, el) => {
+      if (items.length >= 18) return false;
+      const id = $(el).attr('data-id') || '';
+      const a = $(el).find('.thumb-under p.title a');
+      const img = $(el).find('.thumb img');
+      const title = (a.attr('title') || a.text() || '').trim();
+      const href = a.attr('href') || '';
+      const dur = $(el).find('.thumb-under p.title span.duration').text().trim();
+      const thumb = img.attr('data-src') || img.attr('src') || '';
+      if (!id || !title || !thumb) return;
+      items.push({
+        id,
+        title,
+        duration: dur || 'HD',
+        views: 'Verified',
+        rating: 'XVideos',
+        thumbnail: thumb.startsWith('//') ? `https:${thumb}` : thumb,
+        embedUrl: `https://www.xvideos.com/embedframe/${encodeURIComponent(id)}`,
+        sourceUrl: href.startsWith('http') ? href : `https://www.xvideos.com${href}`,
+        provider: 'xvideos',
+        uploader: $(el).find('.metadata .name').text().trim() || 'XVideos Channel',
+      });
+      return undefined;
+    });
+    return items;
+  }
+
+  async function fetchPornhubAdultColony(q: string, page: number): Promise<XeroHotsVideo[]> {
+    const term = (q || '').trim();
+    const url = term
+      ? `https://www.pornhub.com/video/search?search=${encodeURIComponent(term)}&page=${page}`
+      : `https://www.pornhub.com/video?o=tr&page=${page}`;
+    const res = await fetch(url, {
+      headers: { ...HOTS_BROWSER_HEADERS, Cookie: 'accessAgeDisclaimerPH=1' },
+      signal: AbortSignal.timeout(4800),
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const items: XeroHotsVideo[] = [];
+    $('li.pcVideoListItem, ul.videos li.videoblock').each((_, el) => {
+      if (items.length >= 18) return false;
+      const vk = $(el).attr('data-video-vkey') || '';
+      const a = $(el).find('span.title a').first();
+      const title = (a.attr('title') || a.text() || $(el).find('a').attr('title') || '').trim();
+      const img = $(el).find('img').first();
+      const thumb =
+        img.attr('data-src') || img.attr('data-thumb_url') || img.attr('src') || '';
+      const dur = $(el).find('.duration').first().text().trim();
+      const views = $(el).find('.views var').first().text().trim();
+      if (!vk || !title || !thumb || thumb.startsWith('data:')) return;
+      items.push({
+        id: vk,
+        title,
+        duration: dur || 'HD',
+        views: views || 'Hot',
+        rating: 'Pornhub',
+        thumbnail: thumb.startsWith('//') ? `https:${thumb}` : thumb,
+        embedUrl: `https://www.pornhub.com/embed/${encodeURIComponent(vk)}`,
+        sourceUrl: `https://www.pornhub.com/view_video.php?viewkey=${encodeURIComponent(vk)}`,
+        provider: 'pornhub',
+        uploader: $(el).find('.usernameWrap a').first().text().trim() || 'Pornhub Creator',
+      });
+      return undefined;
+    });
+    return items;
+  }
+
+  async function queryAdultColony(provider: string, query: string, page: number) {
+    const cleanProv = ['eporner', 'xvideos', 'pornhub', 'all'].includes(provider)
+      ? provider
+      : 'all';
+    const cleanQuery = query.slice(0, 80).trim();
+    const cacheKey = `${cleanProv}:${cleanQuery}:${page}`;
+    const hit = xeroHotsCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      return hit.items;
+    }
+
+    let items: XeroHotsVideo[] = [];
+    if (cleanProv === 'eporner') {
+      items = await fetchEpornerAdultColony(cleanQuery, page).catch(() => []);
+    } else if (cleanProv === 'xvideos') {
+      items = await fetchXvideosAdultColony(cleanQuery, page).catch(() => []);
+    } else if (cleanProv === 'pornhub') {
+      items = await fetchPornhubAdultColony(cleanQuery, page).catch(() => []);
+    } else {
+      const [epRes, xvRes, phRes] = await Promise.allSettled([
+        fetchEpornerAdultColony(cleanQuery, page),
+        fetchXvideosAdultColony(cleanQuery, page),
+        fetchPornhubAdultColony(cleanQuery, page),
+      ]);
+      const ep = epRes.status === 'fulfilled' ? epRes.value : [];
+      const xv = xvRes.status === 'fulfilled' ? xvRes.value : [];
+      const ph = phRes.status === 'fulfilled' ? phRes.value : [];
+      const maxLen = Math.max(ep.length, xv.length, ph.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (i < ep.length) items.push(ep[i]);
+        if (i < xv.length) items.push(xv[i]);
+        if (i < ph.length) items.push(ph[i]);
+      }
+    }
+
+    if (xeroHotsCache.size > 150) {
+      const firstKey = xeroHotsCache.keys().next().value;
+      if (firstKey) xeroHotsCache.delete(firstKey);
+    }
+    xeroHotsCache.set(cacheKey, { items, expiresAt: Date.now() + 90_000 });
+    return items;
+  }
+
+  app.get('/api/xerohots/feed', async (req: Request, res: Response) => {
+    const provider = String(req.query.provider || 'all').toLowerCase();
+    const page = Math.max(1, Math.min(20, Number(req.query.page || 1) || 1));
+    try {
+      const items = await queryAdultColony(provider, '', page);
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      res.json({ ok: true, provider, page, items });
+    } catch (error) {
+      res.status(502).json({
+        ok: false,
+        error: 'Unable to load XeroHots stream feed.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get('/api/xerohots/search', async (req: Request, res: Response) => {
+    const q = String(req.query.q || req.query.query || '').trim();
+    const provider = String(req.query.provider || 'all').toLowerCase();
+    const page = Math.max(1, Math.min(20, Number(req.query.page || 1) || 1));
+    try {
+      const items = await queryAdultColony(provider, q, page);
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      res.json({ ok: true, provider, query: q, page, items });
+    } catch (error) {
+      res.status(502).json({
+        ok: false,
+        error: 'XeroHots search failed.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // Clean JSON 404 for unknown /api/* paths
   app.use('/api', (_req: Request, res: Response) => {
     res.status(404).json({ error: 'API endpoint not found' });
@@ -1803,8 +2344,38 @@ Output APK: \`out/XEROTV.apk\`
 
 let vercelAppInstance: ReturnType<typeof createApiApp> | null = null;
 
+function normalizeVercelServerlessUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl, 'http://localhost');
+    const xeroPath = parsed.searchParams.get('__xero_path');
+    if (xeroPath !== null) {
+      parsed.searchParams.delete('__xero_path');
+      const cleaned = xeroPath.replace(/^\/+/, '').replace(/^api\/+/, '');
+      const qs = parsed.searchParams.toString();
+      return `/api/${cleaned || 'health'}${qs ? `?${qs}` : ''}`;
+    }
+    if (
+      parsed.pathname === '/' ||
+      parsed.pathname === '/api' ||
+      parsed.pathname === '/api/index' ||
+      parsed.pathname === '/api/index.ts'
+    ) {
+      const qs = parsed.searchParams.toString();
+      return `/api/health${qs ? `?${qs}` : ''}`;
+    }
+    if (!parsed.pathname.startsWith('/api/')) {
+      const qs = parsed.searchParams.toString();
+      return `/api${parsed.pathname.startsWith('/') ? '' : '/'}${parsed.pathname}${qs ? `?${qs}` : ''}`;
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
 export default function handler(req: Request, res: Response) {
   try {
+    req.url = normalizeVercelServerlessUrl(req.url || '/');
     if (!vercelAppInstance) {
       vercelAppInstance = createApiApp();
     }

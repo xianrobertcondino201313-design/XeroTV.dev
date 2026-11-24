@@ -94,6 +94,12 @@ export class ErrorOverlay extends (typeof HTMLElement !== 'undefined' ? HTMLElem
 
 async function startServer() {
   const app = createApiApp();
+  app.use('/apps/XEROTV.apk', (_req, res, next) => {
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="XEROTV.apk"');
+    res.setHeader('Accept-Ranges', 'bytes');
+    next();
+  });
   const httpServer = http.createServer(app);
 
   if (!IS_PROD) {

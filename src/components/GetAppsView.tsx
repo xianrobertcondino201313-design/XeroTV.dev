@@ -9,8 +9,18 @@ interface GetAppsViewProps {
   onOpenVault: () => void;
 }
 
-function triggerBlobDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
+function triggerDirectHttpDownload(href: string, filename: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function triggerXmlBlobDownload(text: string, mimeType: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: mimeType }));
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
@@ -21,13 +31,18 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 15_000);
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+async function probeApkEndpoint(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: 'HEAD', credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return false;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('text/html') || ct.includes('application/json')) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
   }
-  return btoa(binary);
 }
 
 export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) => {
@@ -57,7 +72,6 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
   useEffect(() => {
     let active = true;
     const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-    // Only pre-check if user is running on a public deployment or custom URL
     if (browserOrigin && !isPrivateDevOrigin(browserOrigin) && !customDeployUrl.trim()) {
       setPublicUrlLive(true);
       return;
@@ -86,22 +100,26 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
     if (downloadingApk) return;
     setDownloadingApk(true);
     setDownloadError(null);
-    setDownloadStatus('Building standalone XEROTV.apk installer...');
+    setDownloadStatus('Checking signed XEROTV.apk installer...');
     try {
-      let res = await fetch(
-        `/api/apps/android.apk?origin=${encodeURIComponent(effectivePublicOrigin)}`,
-        { credentials: 'include' },
+      const staticApkUrl = '/apps/XEROTV.apk';
+      const apiApkUrl = `/api/apps/android.apk?origin=${encodeURIComponent(effectivePublicOrigin)}`;
+      const isStaticReady = await probeApkEndpoint(staticApkUrl);
+      let chosenUrl = staticApkUrl;
+
+      if (!isStaticReady) {
+        const isApiReady = await probeApkEndpoint(apiApkUrl);
+        if (!isApiReady) {
+          throw new Error('Could not reach a valid signed XEROTV.apk package. Please retry.');
+        }
+        chosenUrl = apiApkUrl;
+      }
+
+      // Direct HTTP download avoids blob: MIME/filename corruption on Android Package Installer
+      triggerDirectHttpDownload(chosenUrl, 'XEROTV.apk');
+      setDownloadStatus(
+        'Downloading XEROTV.apk directly (standalone app). Open Downloads -> tap XEROTV.apk -> allow "Install unknown apps" if asked -> tap Install.',
       );
-      if (!res.ok) {
-        res = await fetch('/apps/XEROTV.apk', { credentials: 'include' });
-      }
-      if (!res.ok) {
-        throw new Error(`Could not prepare Android installer (HTTP ${res.status})`);
-      }
-      const buffer = await res.arrayBuffer();
-      const apkBlob = new Blob([buffer], { type: 'application/vnd.android.package-archive' });
-      triggerBlobDownload(apkBlob, 'XEROTV.apk');
-      setDownloadStatus('XEROTV.apk downloaded cleanly (standalone app built-in). Open Downloads to install.');
     } catch (err) {
       setDownloadStatus(null);
       setDownloadError(err instanceof Error ? err.message : 'Download failed. Please try again.');
@@ -116,40 +134,25 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
     setDownloadError(null);
     setDownloadStatus('Preparing iPhone / iPad app installer...');
     try {
-      // Verify the target public URL is live before generating a .mobileconfig that opens it
-      const probeRes = await fetch(
-        `/api/apps/check-public-url?url=${encodeURIComponent(effectivePublicOrigin)}`,
-        { credentials: 'include' },
-      );
-      const probeData = (await probeRes.json().catch(() => ({ reachable: false }))) as {
-        reachable?: boolean;
-      };
-      const isLive = Boolean(probeData?.reachable);
-      setPublicUrlLive(isLive);
-
-      if (!isLive) {
-        setDownloadStatus(null);
-        setShowGuide(true);
-        return;
-      }
-
-      const res = await fetch(
-        `/api/apps/ios.mobileconfig?origin=${encodeURIComponent(effectivePublicOrigin)}`,
-        { credentials: 'include' },
-      );
-      if (!res.ok) {
+      const profileUrl = `/api/apps/ios.mobileconfig?origin=${encodeURIComponent(effectivePublicOrigin)}`;
+      const res = await fetch(profileUrl, { credentials: 'include', cache: 'no-store' });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || ct.includes('text/html') || ct.includes('application/json')) {
         throw new Error(`Could not prepare iPhone profile (HTTP ${res.status})`);
       }
-      const buffer = await res.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
+      const text = await res.text();
+      if (!text.trimStart().startsWith('<?xml')) {
+        throw new Error('Invalid iOS configuration profile response.');
+      }
 
       if (isIOS) {
-        const b64 = bytesToBase64(bytes);
-        window.location.href = `data:application/x-apple-aspen-config;base64,${b64}`;
-        setDownloadStatus('Allow the profile prompt, then open iPhone Settings -> Profile Downloaded -> Install.');
+        // Direct HTTPS navigation triggers native iOS Safari "Allow Profile Download" dialog cleanly
+        window.location.assign(profileUrl);
+        setDownloadStatus(
+          'Tap Allow when Safari prompts, then open iPhone Settings -> Profile Downloaded -> Install.',
+        );
       } else {
-        const iosBlob = new Blob([bytes], { type: 'application/x-apple-aspen-config' });
-        triggerBlobDownload(iosBlob, 'XEROTV-iPhone.mobileconfig');
+        triggerXmlBlobDownload(text, 'application/x-apple-aspen-config', 'XEROTV-iPhone.mobileconfig');
         setDownloadStatus('XEROTV-iPhone.mobileconfig downloaded. Open it on iPhone or iPad to install.');
       }
     } catch (err) {
@@ -255,7 +258,7 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
                 type="url"
                 value={customDeployUrl}
                 onChange={(e) => setCustomDeployUrl(e.target.value)}
-                placeholder="https://your-xerotv-app.vercel.app (needed only for remote iOS profile)"
+                placeholder="https://xerotv.vercel.app (override only if self-hosting elsewhere)"
                 className={`w-full rounded-xl px-3 py-2 text-xs font-mono outline-none border ${
                   isKids
                     ? 'bg-white border-sky-200 text-slate-900 focus:border-sky-400'
@@ -351,16 +354,24 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
                 isKids ? 'bg-sky-50 text-slate-700' : 'bg-white/5 border border-white/10 text-zinc-300'
               }`}
             >
-              <div>
-                <div className="font-semibold text-xs mb-0.5">Android Phones &amp; Tablets</div>
+              <div className="space-y-1">
+                <div className="font-semibold text-xs">Android Phones &amp; Tablets</div>
                 <p className="opacity-80">
-                  Downloads a standalone signed <span className="font-mono font-semibold">XEROTV.apk</span> with the full app built in. Tap and select Install.
+                  Direct signed <span className="font-mono font-semibold">XEROTV.apk</span> (HTTP download — never blob). If Android asks, enable <strong>Install unknown apps</strong> for your browser, or use the{' '}
+                  <a
+                    href="/apps/XEROTV.apk"
+                    download="XEROTV.apk"
+                    className="underline font-semibold"
+                  >
+                    direct APK mirror
+                  </a>
+                  .
                 </p>
               </div>
-              <div>
-                <div className="font-semibold text-xs mb-0.5">iPhone &amp; iPad (iOS)</div>
+              <div className="space-y-1">
+                <div className="font-semibold text-xs">iPhone &amp; iPad (iOS)</div>
                 <p className="opacity-80">
-                  On iPhone Safari, tap <span className="font-semibold">Share &rarr; Add to Home Screen</span> right away, or enter a published Vercel URL to generate a <span className="font-mono font-semibold">.mobileconfig</span> profile.
+                  On iPhone Safari, tap <span className="font-semibold">Share &rarr; Add to Home Screen</span> right away, or install the <span className="font-mono font-semibold">.mobileconfig</span> pointing to <span className="font-mono">xerotv.vercel.app</span>.
                 </p>
               </div>
             </div>

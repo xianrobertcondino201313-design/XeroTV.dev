@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  Bookmark,
+  BookmarkCheck,
   CheckCircle2,
   Download,
   Film,
   HardDrive,
+  Loader2,
   Play,
+  RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react';
 import type { MediaItem, ProfileMode } from '../utils/modes';
-import { buildEmbedUrl, STREAMING_SERVERS } from '../utils/servers';
+import { buildEmbedUrl, getNextServerId, STREAMING_SERVERS } from '../utils/servers';
 import { cachedTmdbFetch, TMDB_CACHE_TTL } from '../utils/tmdbCache';
 import {
   canDownloadMovie,
@@ -25,6 +29,7 @@ import {
   markOfflineMovieWatched,
 } from '../lib/offlineVault';
 import { useDownloadManager } from '../lib/downloadContext';
+import { useWatchlist } from '../lib/watchlistContext';
 import { loadAppSettings } from '../utils/settings';
 import { playClickFx } from '../utils/soundFx';
 import { MediaCard } from './MediaCard';
@@ -87,6 +92,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [details, setDetails] = useState<TmdbDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverId, setServerId] = useState<string>(() => {
+    const preferred = loadAppSettings().defaultServerId;
     try {
       const saved = localStorage.getItem(SERVER_STORAGE_KEY);
       if (saved && STREAMING_SERVERS.some((s) => s.id === saved)) {
@@ -95,8 +101,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     } catch {
       // ignore storage errors
     }
-    return 'vidzen';
+    return STREAMING_SERVERS.some((s) => s.id === preferred) ? preferred : STREAMING_SERVERS[0].id;
   });
+  const [iframeLoading, setIframeLoading] = useState<boolean>(true);
+  const [iframeSlowWarning, setIframeSlowWarning] = useState<boolean>(false);
   const [isSandboxEnabled, setIsSandboxEnabled] = useState<boolean>(true);
   const [season, setSeason] = useState(1);
   const [episode, setEpisode] = useState(1);
@@ -106,6 +114,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [localDownloadError, setLocalDownloadError] = useState('');
   const [offlinePlaybackUrl, setOfflinePlaybackUrl] = useState<string | null>(null);
   const { jobs, startBackgroundDownload, cancelBackgroundDownload, dismissJobError } = useDownloadManager();
+  const { isInWatchlist, toggleWatchlist } = useWatchlist();
+  const inWatchlist = isInWatchlist(item.id, mediaType);
 
   const activeJob = jobs[itemKey];
   const downloading = activeJob?.status === 'downloading';
@@ -187,8 +197,46 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     null;
 
   const activeServer = STREAMING_SERVERS.find((s) => s.id === serverId) || STREAMING_SERVERS[0];
+  const isStrictNoPopups = activeServer.strictNoPopups;
+  const effectiveSandbox = isStrictNoPopups ? true : isSandboxEnabled;
   const embedSrc = buildEmbedUrl(activeServer.id, mediaType, item.id, season, episode, trailerKey);
   const isAlreadyDownloaded = downloadedKeys.has(itemKey);
+
+  useEffect(() => {
+    if (offlinePlaybackUrl) {
+      setIframeLoading(false);
+      setIframeSlowWarning(false);
+      return;
+    }
+    setIframeLoading(true);
+    setIframeSlowWarning(false);
+    const loadFallback = window.setTimeout(() => {
+      setIframeLoading(false);
+    }, 3500);
+    const slowTimer = window.setTimeout(() => {
+      setIframeSlowWarning(true);
+    }, 4500);
+    return () => {
+      window.clearTimeout(loadFallback);
+      window.clearTimeout(slowTimer);
+    };
+  }, [embedSrc, offlinePlaybackUrl, effectiveSandbox]);
+
+  const handleSelectServer = (nextId: string) => {
+    playClickFx();
+    if (offlinePlaybackUrl) {
+      URL.revokeObjectURL(offlinePlaybackUrl);
+      setOfflinePlaybackUrl(null);
+    }
+    const targetSrv = STREAMING_SERVERS.find((s) => s.id === nextId) || STREAMING_SERVERS[0];
+    setServerId(targetSrv.id);
+    setIsSandboxEnabled(targetSrv.strictNoPopups ? true : targetSrv.defaultSandbox);
+    try {
+      localStorage.setItem(SERVER_STORAGE_KEY, targetSrv.id);
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   const handleCancelDownload = () => {
     playClickFx();
@@ -248,7 +296,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-8">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <button
           type="button"
           onClick={onBack}
@@ -262,8 +310,31 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <span>Back to Catalog</span>
         </button>
 
-        <div className="text-xs tabular-nums opacity-75">
-          TMDB #{item.id} · {mediaType === 'tv' ? 'Series' : 'Movie'}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            data-testid="player-watchlist-btn"
+            onClick={() => {
+              playClickFx();
+              toggleWatchlist(item);
+            }}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+              inWatchlist
+                ? isKids
+                  ? 'bg-sky-600 border-sky-600 text-white'
+                  : 'bg-white border-white text-zinc-950'
+                : isKids
+                  ? 'bg-white border-sky-200 text-slate-800 hover:bg-sky-50'
+                  : 'liquid-glass text-white hover:bg-white/10'
+            }`}
+          >
+            {inWatchlist ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+            <span>{inWatchlist ? 'In Watchlist' : 'Add to Watchlist'}</span>
+          </button>
+
+          <div className="text-xs tabular-nums opacity-75">
+            TMDB #{item.id} · {mediaType === 'tv' ? 'Series' : 'Movie'}
+          </div>
         </div>
       </div>
 
@@ -289,19 +360,30 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               className="relative z-10 w-full h-full object-contain bg-black"
             />
           ) : (
-            <iframe
-              key={`${activeServer.id}-${item.id}-${season}-${episode}-${isSandboxEnabled}`}
-              src={embedSrc}
-              title={`${title} — ${activeServer.name}`}
-              sandbox={isSandboxEnabled ? activeServer.sandboxFlags : undefined}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-              referrerPolicy="strict-origin-when-cross-origin"
-              className="relative z-10 w-full h-full border-0"
-            />
+            <>
+              <iframe
+                key={`${activeServer.id}-${item.id}-${season}-${episode}-${effectiveSandbox}`}
+                src={embedSrc}
+                title={`${title} — ${activeServer.name}`}
+                sandbox={effectiveSandbox ? activeServer.sandboxFlags : undefined}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                referrerPolicy="strict-origin-when-cross-origin"
+                onLoad={() => setIframeLoading(false)}
+                className="relative z-10 w-full h-full border-0"
+              />
+              {iframeLoading && (
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/55 backdrop-blur-sm">
+                  <div className="rounded-2xl bg-zinc-900/90 border border-white/15 px-4 py-2.5 flex items-center gap-2.5 text-xs text-white font-semibold shadow-xl">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Connecting {activeServer.name} stream...</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Sandbox Streaming Server Switcher (mstream Multi-Server + Sandbox Control) */}
+        {/* Sandbox Streaming Server Switcher (mstream Multi-Server + Pop-Out Ad Shield) */}
         <div
           className={`rounded-2xl p-4 flex flex-col gap-3 ${
             isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
@@ -310,31 +392,60 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <ShieldCheck className="w-4 h-4" />
-              <span>Streaming Servers (mstream Multi-Provider)</span>
+              <span>Streaming Servers (mstream 10-Provider Sync)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsSandboxEnabled((prev) => !prev)}
-                aria-pressed={isSandboxEnabled}
-                title="Sandbox blocks popups and redirects while keeping playback smooth"
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
-                  isSandboxEnabled
-                    ? isKids
+            <div className="flex flex-wrap items-center gap-2">
+              {!offlinePlaybackUrl && (
+                <button
+                  type="button"
+                  data-testid="try-next-server-btn"
+                  onClick={() => handleSelectServer(getNextServerId(activeServer.id))}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                    isKids
+                      ? 'bg-sky-100 text-sky-900 hover:bg-sky-200'
+                      : 'bg-white/15 text-white hover:bg-white/25'
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Try Next Server</span>
+                </button>
+              )}
+              {isStrictNoPopups ? (
+                <div
+                  data-testid="vidzen-adblock-shield"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border ${
+                    isKids
                       ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
                       : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
-                    : isKids
-                      ? 'bg-rose-50 border-rose-300 text-rose-700'
-                      : 'bg-rose-500/15 border-rose-400/40 text-rose-300'
-                }`}
-              >
-                {isSandboxEnabled ? (
+                  }`}
+                >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                ) : (
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                )}
-                <span>{isSandboxEnabled ? 'Sandbox: ON' : 'Sandbox: OFF'}</span>
-              </button>
+                  <span>Pop-Out Ads Blocked (Locked)</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsSandboxEnabled((prev) => !prev)}
+                  aria-pressed={effectiveSandbox}
+                  title="Sandbox blocks popups and redirects while keeping playback smooth"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                    effectiveSandbox
+                      ? isKids
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                      : isKids
+                        ? 'bg-rose-50 border-rose-300 text-rose-700'
+                        : 'bg-rose-500/15 border-rose-400/40 text-rose-300'
+                  }`}
+                >
+                  {effectiveSandbox ? (
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  ) : (
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                  )}
+                  <span>{effectiveSandbox ? 'Sandbox: ON' : 'Sandbox: OFF'}</span>
+                </button>
+              )}
               {offlinePlaybackUrl && (
                 <button
                   type="button"
@@ -358,19 +469,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                   key={srv.id}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => {
-                    if (offlinePlaybackUrl) {
-                      URL.revokeObjectURL(offlinePlaybackUrl);
-                      setOfflinePlaybackUrl(null);
-                    }
-                    setServerId(srv.id);
-                    setIsSandboxEnabled(srv.defaultSandbox);
-                    try {
-                      localStorage.setItem(SERVER_STORAGE_KEY, srv.id);
-                    } catch {
-                      // ignore storage errors
-                    }
-                  }}
+                  onClick={() => handleSelectServer(srv.id)}
                   className={`px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer min-h-[40px] flex items-center gap-2 ${
                     selected
                       ? isKids
@@ -389,9 +488,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               );
             })}
           </div>
-          <p className={`text-xs ${isKids ? 'text-slate-500' : 'text-zinc-400'}`}>
-            Active Server: {activeServer.name} — {activeServer.providerNote}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <p className={isKids ? 'text-slate-500' : 'text-zinc-400'}>
+              Active Server: {activeServer.name} — {activeServer.providerNote}
+            </p>
+            {iframeSlowWarning && !offlinePlaybackUrl && (
+              <span className={isKids ? 'text-sky-700 font-medium' : 'text-amber-300/90'}>
+                Video not loading on {activeServer.name}? Tap Try Next Server or Official Trailer.
+              </span>
+            )}
+          </div>
         </div>
 
         {/* TV Season & Episode Picker */}
@@ -581,7 +687,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenAccount}
-                className="w-full py-2.5 px-4 rounded-xl bg-white text-zinc-950 text-xs font-semibold hover:bg-zinc-200 transition-colors cursor-pointer"
+                className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                  isKids
+                    ? 'bg-sky-600 text-white hover:bg-sky-700'
+                    : 'bg-white text-zinc-950 hover:bg-zinc-200'
+                }`}
               >
                 Sign In to Unlock Offline Vault
               </button>
@@ -591,14 +701,22 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <div className="space-y-3">
             {isAlreadyDownloaded ? (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                <div
+                  className={`flex items-center gap-2 text-xs font-semibold ${
+                    isKids ? 'text-emerald-700' : 'text-emerald-400'
+                  }`}
+                >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Saved in Local Offline Vault</span>
                 </div>
                 <button
                   type="button"
                   onClick={handlePlayOffline}
-                  className="w-full py-3 px-4 rounded-xl bg-white text-zinc-950 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors cursor-pointer"
+                  className={`w-full py-3 px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                    isKids
+                      ? 'bg-sky-600 text-white hover:bg-sky-700'
+                      : 'bg-white text-zinc-950 hover:bg-zinc-200'
+                  }`}
                 >
                   <Play className="w-4 h-4" />
                   <span>Watch Offline Now</span>
@@ -606,7 +724,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                 <button
                   type="button"
                   onClick={handleDeleteOffline}
-                  className="w-full py-2.5 px-4 rounded-xl border border-white/15 text-xs font-medium text-rose-400 hover:bg-rose-500/10 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  className={`w-full py-2.5 px-4 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                    isKids
+                      ? 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                      : 'border-white/15 text-rose-400 hover:bg-rose-500/10'
+                  }`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete Offline File</span>
@@ -655,9 +777,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                         {formatBytes(downloadProgress.loaded)} / {formatBytes(downloadProgress.total)}
                       </span>
                     </div>
-                    <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div className={`w-full h-2 rounded-full overflow-hidden ${isKids ? 'bg-sky-100' : 'bg-white/10'}`}>
                       <div
-                        className="h-full bg-white transition-all duration-150"
+                        className={`h-full transition-all duration-150 ${isKids ? 'bg-sky-600' : 'bg-white'}`}
                         style={{
                           width: `${Math.min(
                             100,
@@ -671,7 +793,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
                 {displayedDownloadError && (
                   <div className="space-y-2">
-                    <p className="text-xs text-rose-400 font-medium" role="alert">
+                    <p className={`text-xs font-medium ${isKids ? 'text-rose-600' : 'text-rose-400'}`} role="alert">
                       {displayedDownloadError}
                     </p>
                     <button
@@ -703,7 +825,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                       type="button"
                       onClick={handleCancelDownload}
                       aria-label="Cancel download"
-                      className="p-3 rounded-xl border border-white/20 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+                      className={`p-3 rounded-xl border cursor-pointer ${
+                        isKids
+                          ? 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                          : 'border-white/20 text-rose-400 hover:bg-rose-500/15'
+                      }`}
                     >
                       <X className="w-4 h-4" />
                     </button>

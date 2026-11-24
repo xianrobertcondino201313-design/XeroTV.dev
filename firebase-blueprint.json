@@ -45,6 +45,14 @@
           "type": "array",
           "description": "List of promo codes already redeemed by this user"
         },
+        "xerostarActive": {
+          "type": "boolean",
+          "description": "Whether the paid ₱150 XEROSTAR (XeroHots VIP) subscription is active"
+        },
+        "xerostarExpiresAtMs": {
+          "type": "number",
+          "description": "Epoch milliseconds when XEROSTAR subscription expires (0 for none)"
+        },
         "kidsPinHash": {
           "type": "string",
           "description": "SHA-256 hex digest of Kids Mode parental PIN",
@@ -53,6 +61,11 @@
         "adultPinHash": {
           "type": "string",
           "description": "SHA-256 hex digest of 18+ Mode secret PIN",
+          "maxLength": 128
+        },
+        "xerohotsPinHash": {
+          "type": "string",
+          "description": "SHA-256 hex digest of XeroHots private access PIN",
           "maxLength": 128
         },
         "grantedBy": {

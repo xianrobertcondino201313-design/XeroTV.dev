@@ -6,7 +6,7 @@
   "outputDirectory": "dist",
   "installCommand": "npm install --legacy-peer-deps --no-audit --no-fund --loglevel=error",
   "functions": {
-    "api/index.ts": {
+    "api/**/*.ts": {
       "includeFiles": "public/*.png"
     }
   },
@@ -15,7 +15,16 @@
       "source": "/apps/XEROTV.apk",
       "headers": [
         { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
-        { "key": "Content-Disposition", "value": "attachment; filename=\"XEROTV.apk\"" }
+        { "key": "Content-Disposition", "value": "attachment; filename=\"XEROTV.apk\"" },
+        { "key": "Accept-Ranges", "value": "bytes" },
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" }
       ]
     },
     {
@@ -26,7 +35,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/api/(.*)", "destination": "/api/index?__xero_path=$1" },
     {
       "source": "/((?!api/|apps/|media/|assets/|src/|favicon|apple-touch-icon|pwa-|icon|manifest\\.webmanifest|sw\\.js|registerSW\\.js|workbox-).*)",
       "destination": "/index.html"

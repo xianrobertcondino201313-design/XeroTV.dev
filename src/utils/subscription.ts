@@ -10,12 +10,16 @@ export interface UserSubscriptionState {
   storageQuotaBytes: number;
   storageUsedBytes: number;
   redeemedCodes: string[];
+  xerostarActive?: boolean;
+  xerostarExpiresAtMs?: number;
   kidsPinHash?: string;
   adultPinHash?: string;
+  xerohotsPinHash?: string;
   grantedBy?: string;
 }
 
 export const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+export const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 export const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
 export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export const TWO_GB_BYTES = 2 * 1024 * 1024 * 1024;
@@ -50,6 +54,13 @@ export const SUBSCRIPTION_PLANS = {
     durationLabel: 'Permanent Storage',
     description: 'Upgrade your offline vault capacity to 1TB permanently.',
   },
+  XEROSTAR: {
+    id: 'xerostar',
+    name: 'XEROSTAR VIP (XeroHots)',
+    pricePesos: 150,
+    durationLabel: '30 Days VIP Access',
+    description: 'Unlocks PIN-protected XeroHots 18+ video channels with open-source multi-provider streams.',
+  },
 } as const;
 
 export function generateShortUserId(uid: string): string {
@@ -79,6 +90,14 @@ export function isDownloadAccessActive(
   if (account.downloadTier === 'lifetime_bundle') return true;
   if (account.downloadTier === 'free') return false;
   return account.downloadExpiresAtMs > nowMs;
+}
+
+export function isXeroStarActive(
+  account: Pick<UserSubscriptionState, 'xerostarActive' | 'xerostarExpiresAtMs'> | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!account || !account.xerostarActive) return false;
+  return (account.xerostarExpiresAtMs || 0) > nowMs;
 }
 
 export function getRemainingStorageBytes(
@@ -181,7 +200,13 @@ export function calculateRedemptionUpdate(
   };
 }
 
-export type AdminGrantType = 'download_2m' | 'storage_1tb' | 'bundle_2m_1tb' | 'custom_days' | 'revoke';
+export type AdminGrantType =
+  | 'download_2m'
+  | 'storage_1tb'
+  | 'bundle_2m_1tb'
+  | 'xerostar'
+  | 'custom_days'
+  | 'revoke';
 
 export function calculateGrantAmountPesos(grantType: AdminGrantType): number {
   switch (grantType) {
@@ -191,6 +216,8 @@ export function calculateGrantAmountPesos(grantType: AdminGrantType): number {
       return SUBSCRIPTION_PLANS.STORAGE_1TB.pricePesos;
     case 'bundle_2m_1tb':
       return SUBSCRIPTION_PLANS.DOWNLOAD_2M.pricePesos + SUBSCRIPTION_PLANS.STORAGE_1TB.pricePesos;
+    case 'xerostar':
+      return SUBSCRIPTION_PLANS.XEROSTAR.pricePesos;
     default:
       return 0;
   }
@@ -203,7 +230,13 @@ export function calculateAdminGrantUpdate(
   nowMs: number = Date.now(),
 ): Pick<
   UserSubscriptionState,
-  'downloadTier' | 'downloadExpiresAtMs' | 'storageTier' | 'storageQuotaBytes' | 'grantedBy'
+  | 'downloadTier'
+  | 'downloadExpiresAtMs'
+  | 'storageTier'
+  | 'storageQuotaBytes'
+  | 'xerostarActive'
+  | 'xerostarExpiresAtMs'
+  | 'grantedBy'
 > {
   if (grantType === 'revoke') {
     return {
@@ -211,7 +244,22 @@ export function calculateAdminGrantUpdate(
       downloadExpiresAtMs: 0,
       storageTier: 'none',
       storageQuotaBytes: 0,
+      xerostarActive: false,
+      xerostarExpiresAtMs: 0,
       grantedBy: 'admin:revoked',
+    };
+  }
+
+  if (grantType === 'xerostar') {
+    const baseXeroStarExpiry = Math.max(account.xerostarExpiresAtMs || 0, nowMs);
+    return {
+      downloadTier: account.downloadTier,
+      downloadExpiresAtMs: account.downloadExpiresAtMs,
+      storageTier: account.storageTier,
+      storageQuotaBytes: account.storageQuotaBytes,
+      xerostarActive: true,
+      xerostarExpiresAtMs: baseXeroStarExpiry + THIRTY_DAYS_MS,
+      grantedBy: 'admin:xerostar',
     };
   }
 
@@ -222,6 +270,8 @@ export function calculateAdminGrantUpdate(
       downloadExpiresAtMs: baseExpiry + SIXTY_DAYS_MS,
       storageTier: account.storageTier === 'none' ? 'bonus_2gb' : account.storageTier,
       storageQuotaBytes: Math.max(account.storageQuotaBytes || 0, 10 * 1024 * 1024 * 1024),
+      xerostarActive: Boolean(account.xerostarActive),
+      xerostarExpiresAtMs: account.xerostarExpiresAtMs || 0,
       grantedBy: 'admin:download_2m',
     };
   }
@@ -232,6 +282,8 @@ export function calculateAdminGrantUpdate(
       downloadExpiresAtMs: account.downloadExpiresAtMs,
       storageTier: 'permanent_1tb',
       storageQuotaBytes: Math.max(account.storageQuotaBytes || 0, ONE_TB_BYTES),
+      xerostarActive: Boolean(account.xerostarActive),
+      xerostarExpiresAtMs: account.xerostarExpiresAtMs || 0,
       grantedBy: 'admin:storage_1tb',
     };
   }
@@ -243,6 +295,8 @@ export function calculateAdminGrantUpdate(
       downloadExpiresAtMs: baseExpiry + SIXTY_DAYS_MS,
       storageTier: 'permanent_1tb',
       storageQuotaBytes: Math.max(account.storageQuotaBytes || 0, ONE_TB_BYTES),
+      xerostarActive: true,
+      xerostarExpiresAtMs: Math.max(account.xerostarExpiresAtMs || 0, nowMs) + THIRTY_DAYS_MS,
       grantedBy: 'admin:bundle_2m_1tb',
     };
   }
@@ -254,7 +308,8 @@ export function calculateAdminGrantUpdate(
     downloadExpiresAtMs: baseExpiry + safeDays * ONE_DAY_MS,
     storageTier: account.storageTier === 'none' ? 'bonus_2gb' : account.storageTier,
     storageQuotaBytes: Math.max(account.storageQuotaBytes || 0, TWO_GB_BYTES),
+    xerostarActive: Boolean(account.xerostarActive),
+    xerostarExpiresAtMs: account.xerostarExpiresAtMs || 0,
     grantedBy: `admin:custom_${safeDays}d`,
   };
 }
-

@@ -1,5 +1,4 @@
-export const DEFAULT_SHARED_APP_URL =
-  'https://ais-pre-kjqsaa2zuutrws532d2e33-328965355805.asia-east1.run.app';
+export const DEFAULT_SHARED_APP_URL = 'https://xerotv.vercel.app';
 
 /**
  * Ensures any origin baked into an APK, iOS profile, or shared link is publicly

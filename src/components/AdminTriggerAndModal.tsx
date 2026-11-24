@@ -23,11 +23,13 @@ import {
   adminSetFeedbackStatus,
   adminTogglePromoCode,
   fetchFeedbackReports,
+  isCurrentUserAdmin,
   type FeedbackReportItem,
   type FirestorePromoCode,
 } from '../lib/firebase';
 import {
   formatBytes,
+  isXeroStarActive,
   type AdminGrantType,
   type UserSubscriptionState,
 } from '../utils/subscription';
@@ -87,26 +89,46 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
   useEffect(() => {
     if (!open || !verified) return;
 
+    let cancelled = false;
     if (isSignedIn) {
-      adminFetchUsersList()
-        .then((list) => {
-          setUsersList(list);
-          setUsersError('');
-        })
-        .catch(() => {
+      void isCurrentUserAdmin().then((isAdm) => {
+        if (cancelled) return;
+        if (!isAdm) {
           setUsersError(
             'Authenticate with the bootstrapped developer Google account to browse the full user directory & manage Firestore codes.',
           );
-        });
+          return;
+        }
+        adminFetchUsersList()
+          .then((list) => {
+            if (cancelled) return;
+            setUsersList(list);
+            setUsersError('');
+          })
+          .catch(() => {
+            if (cancelled) return;
+            setUsersError(
+              'Authenticate with the bootstrapped developer Google account to browse the full user directory & manage Firestore codes.',
+            );
+          });
 
-      adminListPromoCodes()
-        .then(setPromoList)
-        .catch(() => {});
+        adminListPromoCodes()
+          .then((list) => {
+            if (!cancelled) setPromoList(list);
+          })
+          .catch(() => {});
+      });
     }
 
     fetchFeedbackReports()
-      .then(setReports)
+      .then((list) => {
+        if (!cancelled) setReports(list);
+      })
       .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, verified, isSignedIn]);
 
   const handleOpen = async () => {
@@ -178,7 +200,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
       playUnlockFx();
       setGrantFeedback({
         ok: true,
-        text: `Updated ${res.shortUserId} · Tier: ${res.patch.downloadTier} · Quota: ${formatBytes(res.patch.storageQuotaBytes)}${res.amountPesos > 0 ? ` · Ledger +₱${res.amountPesos}` : ''}`,
+        text: `Updated ${res.shortUserId} · Tier: ${res.patch.downloadTier} · Quota: ${formatBytes(res.patch.storageQuotaBytes)}${res.patch.xerostarActive ? ' · XEROSTAR VIP Active' : ''}${res.amountPesos > 0 ? ` · Ledger +₱${res.amountPesos}` : ''}`,
       });
       setTargetUserId('');
       const refreshed = await adminFetchUsersList().catch(() => null);
@@ -438,7 +460,8 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                           >
                             <option value="download_2m">Download Access — 2 Months (₱500)</option>
                             <option value="storage_1tb">1TB Permanent Storage (₱1,090)</option>
-                            <option value="bundle_2m_1tb">Bundle: 2 Months Download + 1TB Storage (₱1,590)</option>
+                            <option value="xerostar">XEROSTAR VIP — XeroHots Access (₱150)</option>
+                            <option value="bundle_2m_1tb">Bundle: 2 Months + 1TB + XEROSTAR (₱1,590)</option>
                             <option value="custom_days">Custom Download Days</option>
                             <option value="revoke">Revoke / Reset to Free</option>
                           </select>
@@ -498,6 +521,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                                 <th className="py-2 pr-3">UserID</th>
                                 <th className="py-2 pr-3">Download Tier</th>
                                 <th className="py-2 pr-3">Storage Quota</th>
+                                <th className="py-2 pr-3">XEROSTAR</th>
                                 <th className="py-2">Action</th>
                               </tr>
                             </thead>
@@ -507,6 +531,13 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = ({
                                   <td className="py-2 pr-3 font-mono font-semibold">{u.shortUserId}</td>
                                   <td className="py-2 pr-3">{u.downloadTier}</td>
                                   <td className="py-2 pr-3">{formatBytes(u.storageQuotaBytes)}</td>
+                                  <td className="py-2 pr-3">
+                                    {isXeroStarActive(u) ? (
+                                      <span className="text-rose-300 font-semibold">VIP Active</span>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
                                   <td className="py-2">
                                     <button
                                       type="button"

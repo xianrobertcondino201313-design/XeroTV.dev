@@ -89,7 +89,7 @@ export async function hashPin(pin: string): Promise<string> {
 }
 
 const KIDS_ALLOWED_GENRES = new Set([16, 10751, 12, 35, 14, 10402, 10762]);
-const KIDS_BLOCKED_GENRES = new Set([27, 53, 80, 10752]);
+const KIDS_BLOCKED_GENRES = new Set([27, 53, 80, 10752, 10768, 9648]);
 
 export function filterMediaForMode<T extends MediaItem>(items: T[], mode: ProfileMode): T[] {
   if (mode === 'kids') {

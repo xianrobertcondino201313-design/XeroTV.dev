@@ -47,7 +47,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'uid', 'shortUserId', 'downloadTier', 'downloadExpiresAtMs',
           'storageTier', 'storageQuotaBytes', 'storageUsedBytes',
-          'redeemedCodes', 'kidsPinHash', 'adultPinHash', 'grantedBy',
+          'redeemedCodes', 'xerostarActive', 'xerostarExpiresAtMs',
+          'kidsPinHash', 'adultPinHash', 'xerohotsPinHash', 'grantedBy',
           'createdAt', 'updatedAt'
         ])
         && data.uid is string && data.uid == userId && isValidId(data.uid)
@@ -59,8 +60,11 @@ service cloud.firestore {
         && data.storageUsedBytes is number && data.storageUsedBytes >= 0 && data.storageUsedBytes <= 10995116277760
         && data.redeemedCodes is list && data.redeemedCodes.size() <= 50
         && (data.redeemedCodes.size() == 0 || data.redeemedCodes[0] is string)
+        && (!('xerostarActive' in data) || data.xerostarActive is bool)
+        && (!('xerostarExpiresAtMs' in data) || (data.xerostarExpiresAtMs is number && data.xerostarExpiresAtMs >= 0))
         && (!('kidsPinHash' in data) || (data.kidsPinHash is string && data.kidsPinHash.size() <= 128))
         && (!('adultPinHash' in data) || (data.adultPinHash is string && data.adultPinHash.size() <= 128))
+        && (!('xerohotsPinHash' in data) || (data.xerohotsPinHash is string && data.xerohotsPinHash.size() <= 128))
         && (!('grantedBy' in data) || (data.grantedBy is string && data.grantedBy.size() <= 64))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -120,14 +124,14 @@ service cloud.firestore {
           (newCode == 'NEWUSER2026'
             && incoming().storageQuotaBytes == existing().storageQuotaBytes + 2147483648
             && incoming().downloadExpiresAtMs <= (
-              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 172900000
+              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 173700000
             )
           )
           ||
           (newCode == 'VER-1-0XEROTV'
             && incoming().storageQuotaBytes == existing().storageQuotaBytes + 5368709120
             && incoming().downloadExpiresAtMs <= (
-              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 1728100000
+              (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis()) + 1728900000
             )
           )
           ||
@@ -136,7 +140,7 @@ service cloud.firestore {
             && incoming().storageQuotaBytes == existing().storageQuotaBytes + get(/databases/$(database)/documents/promoCodes/$(newCode)).data.storageBonusBytes
             && incoming().downloadExpiresAtMs <= (
               (existing().downloadExpiresAtMs > request.time.toMillis() ? existing().downloadExpiresAtMs : request.time.toMillis())
-              + (get(/databases/$(database)/documents/promoCodes/$(newCode)).data.daysGranted * 86400000) + 120000
+              + (get(/databases/$(database)/documents/promoCodes/$(newCode)).data.daysGranted * 86400000) + 900000
             )
           )
         );
@@ -187,6 +191,8 @@ service cloud.firestore {
         && incoming().storageQuotaBytes == 0
         && incoming().storageUsedBytes == 0
         && incoming().redeemedCodes.size() == 0
+        && (!('xerostarActive' in incoming()) || incoming().xerostarActive == false)
+        && (!('xerostarExpiresAtMs' in incoming()) || incoming().xerostarExpiresAtMs == 0)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && existsAfter(/databases/$(database)/documents/userLookup/$(incoming().shortUserId));
@@ -199,14 +205,15 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Tier 1: Admin subscription grant/revocation
+          // Tier 1: Admin subscription grant/revocation (includes XEROSTAR VIP)
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
-            'downloadTier', 'downloadExpiresAtMs', 'storageTier', 'storageQuotaBytes', 'grantedBy', 'updatedAt'
+            'downloadTier', 'downloadExpiresAtMs', 'storageTier', 'storageQuotaBytes',
+            'xerostarActive', 'xerostarExpiresAtMs', 'grantedBy', 'updatedAt'
           ]))
           ||
           // Tier 2: Owner updates PINs or local storage used telemetry
           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly([
-            'kidsPinHash', 'adultPinHash', 'storageUsedBytes', 'updatedAt'
+            'kidsPinHash', 'adultPinHash', 'xerohotsPinHash', 'storageUsedBytes', 'updatedAt'
           ]))
           ||
           // Tier 3: Owner redeems NEWUSER2026, VER-1-0XEROTV, or an active admin promoCode atomically
@@ -368,6 +375,9 @@ service cloud.firestore {
 
       allow update: if isAdmin()
         && isValidId(reportId)
+        && isValidFeedbackReport(incoming(), reportId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
         && incoming().status in ['open', 'resolved'];
 

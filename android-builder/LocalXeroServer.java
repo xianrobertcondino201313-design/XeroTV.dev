@@ -41,10 +41,10 @@ public class LocalXeroServer {
     private static final int MAX_CHUNK_BYTES = 1572864;
 
     private static final String[] OPEN_STREAMS_HD = {
+            "https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4",
             "https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4",
             "https://archive.org/download/ElephantsDream/ed_hd_512kb.mp4",
-            "https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4",
-            "https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4"
+            "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
     };
 
     private static final String[] OPEN_STREAMS_COMPACT = {
@@ -53,6 +53,8 @@ public class LocalXeroServer {
             "https://archive.org/download/ElephantsDream/ed_hd_512kb.mp4",
             "https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4"
     };
+
+    private static final int LOCAL_FALLBACK_MIRROR_INDEX = 999;
 
     private final AssetManager assets;
     private final ExecutorService workers = Executors.newCachedThreadPool();
@@ -572,9 +574,11 @@ public class LocalXeroServer {
             ep.append("&with_genres=").append(URLEncoder.encode(genre, "UTF-8"));
         }
         if ("kids".equals(mode)) {
-            ep.append("&certification_country=US&certification.lte=PG");
+            if ("movie".equals(mediaType)) {
+                ep.append("&certification_country=US&certification.lte=PG");
+            }
             if (genre.isEmpty()) {
-                ep.append("&with_genres=").append("tv".equals(mediaType) ? "10762,16" : "16,10751");
+                ep.append("&with_genres=").append("tv".equals(mediaType) ? "10762%7C16%7C10751" : "16%7C10751");
             }
         }
         if ("christmas".equals(mode)) {
@@ -587,33 +591,66 @@ public class LocalXeroServer {
     private void handleTmdbStudios(Map<String, String> query, OutputStream out) throws Exception {
         String studio = query.getOrDefault("studio", "netflix").toLowerCase(Locale.US);
         String mode = query.getOrDefault("mode", "main");
+        String typeFilter = query.getOrDefault("type", "all").toLowerCase(Locale.US);
         int page = Math.max(1, Math.min(10, parseIntSafe(query.get("page"), 1)));
 
         String name = "Netflix";
-        String mediaType = "tv";
-        String filterParam = "with_networks=213";
+        String movieFilter = "with_watch_providers=8&watch_region=US";
+        String tvFilter = "with_networks=213";
         switch (studio) {
-            case "disney": name = "Disney+"; mediaType = "tv"; filterParam = "with_networks=2739"; break;
-            case "hbo": name = "HBO / Max"; mediaType = "tv"; filterParam = "with_networks=49%7C3186"; break;
-            case "apple": name = "Apple TV+"; mediaType = "tv"; filterParam = "with_networks=2552"; break;
-            case "prime": name = "Prime Video"; mediaType = "tv"; filterParam = "with_networks=1024"; break;
-            case "marvel": name = "Marvel Studios"; mediaType = "movie"; filterParam = "with_companies=420"; break;
-            case "pixar": name = "Pixar"; mediaType = "movie"; filterParam = "with_companies=3"; break;
-            case "warner": name = "Warner Bros."; mediaType = "movie"; filterParam = "with_companies=174"; break;
-            case "a24": name = "A24"; mediaType = "movie"; filterParam = "with_companies=41077"; break;
+            case "disney": name = "Disney+"; movieFilter = "with_watch_providers=337&watch_region=US"; tvFilter = "with_networks=2739"; break;
+            case "hbo": name = "HBO / Max"; movieFilter = "with_watch_providers=1899%7C384&watch_region=US"; tvFilter = "with_networks=49%7C3186"; break;
+            case "apple": name = "Apple TV+"; movieFilter = "with_watch_providers=350&watch_region=US"; tvFilter = "with_networks=2552"; break;
+            case "prime": name = "Prime Video"; movieFilter = "with_watch_providers=9%7C119&watch_region=US"; tvFilter = "with_networks=1024"; break;
+            case "marvel": name = "Marvel Studios"; movieFilter = "with_companies=420"; tvFilter = "with_companies=420%7C13252"; break;
+            case "pixar": name = "Pixar"; movieFilter = "with_companies=3"; tvFilter = "with_companies=3"; break;
+            case "warner": name = "Warner Bros."; movieFilter = "with_companies=174"; tvFilter = "with_companies=1957%7C174"; break;
+            case "a24": name = "A24"; movieFilter = "with_companies=41077"; tvFilter = "with_companies=41077"; break;
             default: break;
         }
-        StringBuilder ep = new StringBuilder("/discover/" + mediaType + "?language=en-US&page=" + page
-                + "&sort_by=popularity.desc&" + filterParam + "&include_adult=" + ("adult".equals(mode)));
-        if ("kids".equals(mode)) {
-            ep.append("&certification_country=US&certification.lte=PG");
+
+        boolean wantMovies = !"tv".equals(typeFilter);
+        boolean wantTv = !"movie".equals(typeFilter);
+        String kidsMovieParam = "kids".equals(mode) ? "&certification_country=US&certification.lte=PG&without_genres=27,53,80,10752" : "";
+        String kidsTvParam = "kids".equals(mode) ? "&without_genres=27,80,10768" : "";
+
+        Future<JSONObject> fMovies = wantMovies
+                ? workers.submit(() -> {
+                    try {
+                        return tmdbFetch("/discover/movie?language=en-US&page=" + page + "&sort_by=popularity.desc&" + movieFilter + "&include_adult=" + ("adult".equals(mode)) + kidsMovieParam);
+                    } catch (Exception e) {
+                        return new JSONObject();
+                    }
+                })
+                : null;
+
+        Future<JSONObject> fTv = wantTv
+                ? workers.submit(() -> {
+                    try {
+                        return tmdbFetch("/discover/tv?language=en-US&page=" + page + "&sort_by=popularity.desc&" + tvFilter + "&include_adult=" + ("adult".equals(mode)) + kidsTvParam);
+                    } catch (Exception e) {
+                        return new JSONObject();
+                    }
+                })
+                : null;
+
+        JSONArray moviesArr = fMovies != null ? tagItems(fMovies.get().optJSONArray("results"), "movie", !"adult".equals(mode)) : new JSONArray();
+        JSONArray tvArr = fTv != null ? tagItems(fTv.get().optJSONArray("results"), "tv", !"adult".equals(mode)) : new JSONArray();
+
+        JSONArray combined = new JSONArray();
+        int maxLen = Math.max(moviesArr.length(), tvArr.length());
+        for (int i = 0; i < maxLen; i++) {
+            if (i < moviesArr.length()) combined.put(moviesArr.get(i));
+            if (i < tvArr.length()) combined.put(tvArr.get(i));
         }
-        JSONObject data = tmdbFetch(ep.toString());
+
         JSONObject res = new JSONObject();
         res.put("studio", studio);
         res.put("name", name);
-        res.put("mediaType", mediaType);
-        res.put("results", tagItems(data.optJSONArray("results"), mediaType, false));
+        res.put("mediaType", ("movie".equals(typeFilter) || "tv".equals(typeFilter)) ? typeFilter : "mixed");
+        res.put("movieCount", moviesArr.length());
+        res.put("tvCount", tvArr.length());
+        res.put("results", combined);
         sendJson(out, 200, res.toString());
     }
 
@@ -672,6 +709,21 @@ public class LocalXeroServer {
                 if (conn != null) conn.disconnect();
             }
         }
+        try (AssetFileDescriptor afd = assets.openFd("www/media/improving-v1.mp4")) {
+            long localSize = afd.getLength();
+            if (localSize > 0) {
+                JSONObject info = new JSONObject();
+                info.put("ok", true);
+                info.put("mirrorIndex", LOCAL_FALLBACK_MIRROR_INDEX);
+                info.put("totalBytes", localSize);
+                info.put("contentType", "video/mp4");
+                info.put("chunkBytes", MAX_CHUNK_BYTES);
+                info.put("filename", title + "-" + tmdbId + ".mp4");
+                sendJson(out, 200, info.toString());
+                return;
+            }
+        } catch (Exception ignored) {
+        }
         sendJson(out, 502, "{\"error\":\"No upstream video mirror is currently reachable.\"}");
     }
 
@@ -691,6 +743,11 @@ public class LocalXeroServer {
             rangeHeader = "bytes=" + start + "-" + cappedEnd;
         } else if (headers.containsKey("range")) {
             rangeHeader = headers.get("range");
+        }
+
+        if (mirrorParam == LOCAL_FALLBACK_MIRROR_INDEX) {
+            serveAsset("www/media/improving-v1.mp4", "video/mp4", rangeHeader, out);
+            return;
         }
 
         String urlStr = pool[baseIdx];

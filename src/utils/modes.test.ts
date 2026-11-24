@@ -14,13 +14,14 @@ test('filterMediaForMode enforces Kids Mode PG/Animation safety', () => {
     { id: 1, title: 'Toy Story', adult: false, genre_ids: [16, 10751] },
     { id: 2, title: 'Horror Slasher', adult: false, genre_ids: [27, 53] },
     { id: 3, title: 'Adult Film', adult: true, genre_ids: [10749] },
+    { id: 4, title: 'War Mystery', adult: false, genre_ids: [35, 9648, 10768] },
   ];
   const kids = filterMediaForMode(items, 'kids');
   assert.equal(kids.length, 1);
   assert.equal(kids[0].id, 1);
 
   const main = filterMediaForMode(items, 'main');
-  assert.equal(main.length, 2);
+  assert.equal(main.length, 3);
 });
 
 test('verifyPinFormat accepts 4-6 digit numeric PINs only', () => {
@@ -47,24 +48,26 @@ test('Christmas Mode stays locked until December 25 12:00 AM and unlocks on Dec 
   assert.equal(infoOpen.daysRemaining, 0);
 });
 
-test('STREAMING_SERVERS includes mstream VidZen, NxSha, and Zoryva with sandbox support', () => {
+test('STREAMING_SERVERS includes mstream VidZen, VidLink, 2Embed, VidZee, and NxSha with sandbox support', () => {
   const vidzen = STREAMING_SERVERS.find((s) => s.id === 'vidzen');
-  const nxsha = STREAMING_SERVERS.find((s) => s.id === 'nxsha');
+  const vidlink = STREAMING_SERVERS.find((s) => s.id === 'vidlink');
   const zoryva = STREAMING_SERVERS.find((s) => s.id === 'zoryva');
   assert.ok(vidzen);
-  assert.ok(nxsha);
+  assert.ok(vidlink);
   assert.ok(zoryva);
   assert.equal(vidzen.recommendedByXero, true);
-  assert.equal(nxsha.recommendedByXero, true);
+  assert.equal(vidzen.strictNoPopups, true);
+  assert.equal(vidlink.recommendedByXero, true);
   assert.equal(vidzen.sandboxSupported, true);
-  assert.equal(nxsha.sandboxSupported, true);
-  assert.match(buildEmbedUrl('vidzen', 'movie', 550), /player\.vidzee\.wtf\/embed\/movie\/550/);
-  assert.match(buildEmbedUrl('vidzen', 'tv', 1399, 1, 2), /player\.vidzee\.wtf\/embed\/tv\/1399\/1\/2/);
+  assert.equal(vidlink.sandboxSupported, true);
+  assert.match(buildEmbedUrl('vidzen', 'movie', 550), /web\.nxsha\.app\/embed\/movie\/550/);
+  assert.match(buildEmbedUrl('vidzen', 'tv', 1399, 1, 2), /web\.nxsha\.app\/embed\/tv\/1399\/1\/2/);
+  assert.match(buildEmbedUrl('vidlink', 'tv', 1399, 1, 2), /vidlink\.pro\/tv\/1399\/1\/2/);
   assert.match(buildEmbedUrl('nxsha', 'movie', 550), /web\.nxsha\.app\/embed\/movie\/550/);
   assert.match(buildEmbedUrl('nxsha', 'tv', 1399, 1, 2), /web\.nxsha\.app\/embed\/tv\/1399\/1\/2/);
   assert.match(buildEmbedUrl('zoryva', 'tv', 1399, 1, 2), /zoryva\.me\/embed\/tv\/1399\/1\/2/);
-  assert.match(buildEmbedUrl('primesrc', 'movie', 550), /primesrc\.me\/embed\/movie\?tmdb=550/);
-  assert.match(buildEmbedUrl('twoembed', 'movie', 550), /2embed\.cc\/embed\/550/);
+  assert.match(buildEmbedUrl('cinezo', 'movie', 550), /api\.cinezo\.net\/movie\/550/);
+  assert.match(buildEmbedUrl('vidzee', 'tv', 1399, 1, 2), /player\.vidzee\.wtf\/embed\/tv\/1399\/1\/2/);
   assert.match(buildEmbedUrl('trailer', 'movie', 550, 1, 1, 'SUXWAEX2jlg'), /youtube\.com\/embed\/SUXWAEX2jlg.*enablejsapi=1/);
 });
 

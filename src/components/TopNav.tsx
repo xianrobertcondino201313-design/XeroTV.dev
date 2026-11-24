@@ -3,7 +3,7 @@ import { Bell, Settings } from 'lucide-react';
 import { MODE_CONFIGS, type ProfileMode } from '../utils/modes';
 import { playClickFx } from '../utils/soundFx';
 
-export type AppSection = 'home' | 'movies' | 'series' | 'vault' | 'docs' | 'apps';
+export type AppSection = 'home' | 'movies' | 'series' | 'hots' | 'vault' | 'docs' | 'apps';
 
 interface TopNavProps {
   activeSection: AppSection;
@@ -31,20 +31,22 @@ export const TopNav: React.FC<TopNavProps> = ({
   const modeConfig = MODE_CONFIGS[mode];
   const isKids = mode === 'kids';
 
-  const navItems: { id: AppSection; label: string }[] = [
+  const allNavItems: { id: AppSection; label: string }[] = [
     { id: 'home', label: 'Home' },
     { id: 'movies', label: 'Movies' },
     { id: 'series', label: 'Series' },
+    { id: 'hots', label: 'XeroHots' },
     { id: 'vault', label: 'Offline Vault' },
     { id: 'docs', label: 'Docs 1.0' },
     { id: 'apps', label: 'Get Apps' },
   ];
+  const navItems = isKids ? allNavItems.filter((item) => item.id !== 'hots') : allNavItems;
 
   return (
     <header
       className={`sticky top-0 z-40 border-b transition-colors ${
         isKids
-          ? 'bg-white/85 border-sky-200 text-slate-900 backdrop-blur-xl'
+          ? 'bg-white/90 border-sky-200 text-slate-900 backdrop-blur-xl'
           : 'liquid-glass-strong border-white/10'
       }`}
     >
@@ -82,7 +84,11 @@ export const TopNav: React.FC<TopNavProps> = ({
                   active
                     ? isKids
                       ? 'border-sky-600 text-sky-900 font-semibold'
-                      : 'border-white text-white font-semibold'
+                      : mode === 'adult'
+                        ? 'border-rose-400 text-white font-semibold'
+                        : mode === 'christmas'
+                          ? 'border-amber-300 text-white font-semibold'
+                          : 'border-white text-white font-semibold'
                     : isKids
                       ? 'border-transparent text-slate-600 hover:text-slate-900'
                       : 'border-transparent text-zinc-400 hover:text-white'
