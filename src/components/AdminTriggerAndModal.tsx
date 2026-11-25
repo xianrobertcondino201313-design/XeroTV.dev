@@ -273,7 +273,7 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = () => {
           aria-labelledby="admin-modal-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto"
         >
-          <div className="w-full max-w-3xl liquid-glass-strong rounded-3xl p-6 sm:p-8 text-white space-y-6 my-auto max-h-[90vh] overflow-y-auto border border-white/20">
+          <div className="w-full max-w-3xl liquid-glass-strong rounded-2xl p-6 sm:p-8 text-white space-y-6 my-auto max-h-[90vh] overflow-y-auto border border-white/15">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 id="admin-modal-title" className="text-xl sm:text-2xl font-bold font-display">
@@ -654,8 +654,8 @@ export const AdminTriggerAndModal: React.FC<AdminTriggerAndModalProps> = () => {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="font-bold text-white flex items-center gap-2">
-                                <span className="uppercase text-[10px] px-2 py-0.5 rounded bg-white/15">
-                                  {rep.category}
+                                <span className="uppercase text-[10px] font-mono text-zinc-400">
+                                  [{rep.category}]
                                 </span>
                                 <span>{rep.title}</span>
                               </div>

@@ -6,8 +6,8 @@
   "outputDirectory": "dist",
   "installCommand": "npm install --legacy-peer-deps --no-audit --no-fund --loglevel=error",
   "functions": {
-    "api/**/*.ts": {
-      "includeFiles": "public/*.png"
+    "api/index.mjs": {
+      "includeFiles": "{public/*.png,public/media/*.mp4}"
     }
   },
   "headers": [
@@ -35,9 +35,10 @@
     }
   ],
   "rewrites": [
+    { "source": "/api", "destination": "/api/index?__xero_path=health" },
     { "source": "/api/(.*)", "destination": "/api/index?__xero_path=$1" },
     {
-      "source": "/((?!api/|apps/|media/|assets/|src/|favicon|apple-touch-icon|pwa-|icon|manifest\\.webmanifest|sw\\.js|registerSW\\.js|workbox-).*)",
+      "source": "/((?!api(?:/|$)|apps/|media/|assets/|src/|favicon|apple-touch-icon|pwa-|icon|manifest\\.webmanifest|sw\\.js|registerSW\\.js|workbox-).*)",
       "destination": "/index.html"
     }
   ]

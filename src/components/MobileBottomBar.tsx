@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Film, Flame, HardDriveDownload, Home, Smartphone, Tv } from 'lucide-react';
+import { Clapperboard, Film, Flame, HardDriveDownload, Home, Tv } from 'lucide-react';
 import type { AppSection } from './TopNav';
 import type { ProfileMode } from '../utils/modes';
 import { playClickFx } from '../utils/soundFx';
@@ -16,26 +16,29 @@ export const MobileBottomBar: React.FC<MobileBottomBarProps> = ({
   mode,
 }) => {
   const isKids = mode === 'kids';
-  const allTabs: { id: AppSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'home', label: 'Home', Icon: Home },
-    { id: 'movies', label: 'Movies', Icon: Film },
-    { id: 'series', label: 'Series', Icon: Tv },
-    { id: 'hots', label: 'Hots', Icon: Flame },
-    { id: 'vault', label: 'Vault', Icon: HardDriveDownload },
-    { id: 'docs', label: 'Docs', Icon: BookOpen },
-    { id: 'apps', label: 'Apps', Icon: Smartphone },
-  ];
-  const tabs = isKids ? allTabs.filter((t) => t.id !== 'hots') : allTabs;
+  const tabs: { id: AppSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = isKids
+    ? [
+        { id: 'home', label: 'Home', Icon: Home },
+        { id: 'movies', label: 'Movies', Icon: Film },
+        { id: 'series', label: 'Series', Icon: Tv },
+        { id: 'drama', label: 'Drama', Icon: Clapperboard },
+        { id: 'vault', label: 'Vault', Icon: HardDriveDownload },
+      ]
+    : [
+        { id: 'home', label: 'Home', Icon: Home },
+        { id: 'movies', label: 'Movies', Icon: Film },
+        { id: 'drama', label: 'Drama', Icon: Clapperboard },
+        { id: 'hots', label: 'Hots', Icon: Flame },
+        { id: 'vault', label: 'Vault', Icon: HardDriveDownload },
+      ];
 
   return (
     <nav
       aria-label="Mobile Navigation"
-      className={`md:hidden fixed bottom-0 left-0 right-0 z-40 h-16 border-t grid ${
-        isKids ? 'grid-cols-6' : 'grid-cols-7'
-      } items-center ${
+      className={`md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 border-t grid grid-cols-5 items-center ${
         isKids
           ? 'bg-white/95 border-sky-200 text-slate-700 backdrop-blur-xl'
-          : 'liquid-glass-strong border-white/10 text-zinc-300'
+          : 'liquid-glass-strong border-[var(--surface-border)] text-zinc-300'
       }`}
     >
       {tabs.map(({ id, label, Icon }) => {
@@ -44,6 +47,7 @@ export const MobileBottomBar: React.FC<MobileBottomBarProps> = ({
           <button
             key={id}
             type="button"
+            data-testid={`mobile-nav-${id}`}
             onClick={() => {
               playClickFx();
               onSelectSection(id);
@@ -60,8 +64,8 @@ export const MobileBottomBar: React.FC<MobileBottomBarProps> = ({
                 : 'opacity-70 hover:opacity-100'
             }`}
           >
-            <Icon className="w-4 h-4" />
-            <span className="mt-1 leading-none">{label}</span>
+            <Icon className="w-[18px] h-[18px]" />
+            <span className="mt-0.5 leading-none">{label}</span>
           </button>
         );
       })}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bookmark, Film, HardDriveDownload, Play, RefreshCw, Search, WifiOff } from 'lucide-react';
+import { ArrowRight, Bookmark, Clapperboard, Film, Play, RefreshCw, Search, WifiOff } from 'lucide-react';
 import {
   refreshAuthSession,
   saveUserPinHash,
@@ -23,6 +23,7 @@ import {
   type ProfileMode,
 } from './utils/modes';
 import { cachedTmdbFetch, TMDB_CACHE_TTL } from './utils/tmdbCache';
+import type { ShortDramaSeries } from './utils/shortDrama';
 import type { UserSubscriptionState } from './utils/subscription';
 import { playClickFx } from './utils/soundFx';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -38,6 +39,7 @@ import { OfflineVaultView } from './components/OfflineVaultView';
 import { DocsAndChangelogView } from './components/DocsAndChangelogView';
 import { GetAppsView } from './components/GetAppsView';
 import { XeroHotsView } from './components/XeroHotsView';
+import { ShortDramaView } from './components/ShortDramaView';
 import { PinModal } from './components/PinModal';
 import { AccountModal } from './components/AccountModal';
 import { AdminTriggerAndModal } from './components/AdminTriggerAndModal';
@@ -48,7 +50,6 @@ import { SettingsModal } from './components/SettingsModal';
 import { NotificationsDrawer } from './components/NotificationsDrawer';
 import { BackgroundDownloadsTray } from './components/BackgroundDownloadsTray';
 import { ChristmasLockModal } from './components/ChristmasLockModal';
-import { TiltGlassCard } from './components/TiltGlassCard';
 
 interface FeedSection {
   id: string;
@@ -74,6 +75,7 @@ function getInitialSectionFromUrl(): AppSection {
   if (
     param === 'movies' ||
     param === 'series' ||
+    param === 'drama' ||
     param === 'hots' ||
     param === 'vault' ||
     param === 'docs' ||
@@ -82,17 +84,6 @@ function getInitialSectionFromUrl(): AppSection {
     return param;
   }
   return 'home';
-}
-
-function shouldShowIntroInitially(): boolean {
-  if (typeof window === 'undefined') return false;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('autostart') === '1') return false;
-  try {
-    return window.localStorage.getItem(HAS_LOGGED_IN_KEY) !== '1';
-  } catch {
-    return false;
-  }
 }
 
 function XeroTvShell() {
@@ -117,11 +108,15 @@ function XeroTvShell() {
   const [searching, setSearching] = useState(false);
 
   const [offlineMovies, setOfflineMovies] = useState<OfflineMovieSummary[]>([]);
+  const [shortDramaSpotlight, setShortDramaSpotlight] = useState<ShortDramaSeries[]>([]);
+  const [loadingDramaSpotlight, setLoadingDramaSpotlight] = useState(false);
+  const [initialShortDrama, setInitialShortDrama] = useState<ShortDramaSeries | null>(null);
+
   const [accountOpen, setAccountOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [christmasLockOpen, setChristmasLockOpen] = useState(false);
-  const [introduceOpen, setIntroduceOpen] = useState<boolean>(() => shouldShowIntroInitially());
+  const [introduceOpen, setIntroduceOpen] = useState<boolean>(false);
   const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
 
   const { items: watchlistItems, clearWatchlist } = useWatchlist();
@@ -259,6 +254,35 @@ function XeroTvShell() {
     setSearchQuery('');
   }, [mode, loadFeed]);
 
+  // Fetch non-blocking Short Drama Spotlight shelf for Home
+  useEffect(() => {
+    if (!isOnline) {
+      setShortDramaSpotlight([]);
+      return;
+    }
+    let active = true;
+    setLoadingDramaSpotlight(true);
+    fetch(`/api/drama/feed?provider=all&category=all&mode=${encodeURIComponent(mode)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { ok?: boolean; items?: ShortDramaSeries[] } | null) => {
+        if (!active) return;
+        if (data?.ok && Array.isArray(data.items)) {
+          setShortDramaSpotlight(data.items.slice(0, 5));
+        } else {
+          setShortDramaSpotlight([]);
+        }
+      })
+      .catch(() => {
+        if (active) setShortDramaSpotlight([]);
+      })
+      .finally(() => {
+        if (active) setLoadingDramaSpotlight(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode, isOnline]);
+
   // Discover Movies or Series when section tab changes
   const [discoverRetryCount, setDiscoverRetryCount] = useState(0);
   useEffect(() => {
@@ -299,7 +323,7 @@ function XeroTvShell() {
     }
     setSearching(true);
     setSelectedMedia(null);
-    if (activeSection === 'vault' || activeSection === 'apps' || activeSection === 'docs') {
+    if (activeSection === 'vault' || activeSection === 'apps' || activeSection === 'docs' || activeSection === 'drama') {
       setActiveSection('home');
     }
     try {
@@ -531,8 +555,20 @@ function XeroTvShell() {
             account={account}
             hasPin={!!getSavedPinHash('hots')}
             isPinUnlocked={hotsUnlockedThisSession}
+            downloadedKeys={downloadedKeys}
+            onVaultChanged={handleVaultChanged}
             onRequestPinUnlock={handleRequestHotsPinUnlock}
             onLockNow={() => setHotsUnlockedThisSession(false)}
+            onOpenAccount={() => setAccountOpen(true)}
+          />
+        ) : activeSection === 'drama' ? (
+          <ShortDramaView
+            mode={mode}
+            account={account}
+            downloadedKeys={downloadedKeys}
+            initialSeries={initialShortDrama}
+            onConsumeInitialSeries={() => setInitialShortDrama(null)}
+            onVaultChanged={handleVaultChanged}
             onOpenAccount={() => setAccountOpen(true)}
           />
         ) : (
@@ -552,7 +588,7 @@ function XeroTvShell() {
               }}
             />
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 space-y-10">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-12">
               {/* Search Results View */}
               {searchResults !== null ? (
                 <section className="space-y-4">
@@ -677,99 +713,88 @@ function XeroTvShell() {
                 /* Home Spotlight & Real TMDB Sections */
                 <>
                   {/* Hero Spotlight */}
-                  <TiltGlassCard intensity={3} className="rounded-3xl">
-                    <section
-                      className={`relative rounded-3xl overflow-hidden min-h-[380px] sm:min-h-[440px] flex items-end ${
-                        isKids ? 'bg-sky-900 text-white' : 'bg-zinc-950 text-white border border-white/10'
-                      }`}
-                    >
-                      {heroItem?.backdrop_path ? (
-                        <img
-                          src={`https://image.tmdb.org/t/p/original${heroItem.backdrop_path}`}
-                          alt={heroItem.title || heroItem.name || 'Featured movie'}
-                          referrerPolicy="no-referrer"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      ) : (
-                        <img
-                          src="/src/assets/images/xerotv_splash_backdrop_1795185549127.jpg"
-                          alt="XEROTV Cinema"
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      )}
-                      <div
-                        aria-hidden="true"
-                        className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/15"
+                  <section
+                    className={`relative rounded-2xl overflow-hidden min-h-[340px] lg:min-h-[430px] flex items-end border ${
+                      isKids ? 'bg-sky-900 text-white border-sky-300/40' : 'bg-zinc-950 text-white border-[var(--surface-border)]'
+                    }`}
+                  >
+                    {heroItem?.backdrop_path ? (
+                      <img
+                        src={`https://image.tmdb.org/t/p/original${heroItem.backdrop_path}`}
+                        alt={heroItem.title || heroItem.name || 'Featured movie'}
+                        referrerPolicy="no-referrer"
+                        className="absolute inset-0 w-full h-full object-cover"
                       />
+                    ) : (
+                      <img
+                        src="/src/assets/images/xerotv_splash_backdrop_1795185549127.jpg"
+                        alt="XEROTV Cinema"
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    )}
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/10"
+                    />
 
-                      <div className="relative z-10 w-full p-6 sm:p-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
-                        <div className="max-w-2xl space-y-3">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={
-                                mode === 'christmas'
-                                  ? '/src/assets/images/xerotv_christmas_emblem_1795185549050.jpg'
-                                  : mode === 'kids'
-                                    ? '/src/assets/images/xerotv_kids_emblem_1795185548914.jpg'
-                                    : '/src/assets/images/xerotv_app_icon_1795185548315.jpg'
-                              }
-                              alt={`${modeCfg.label} emblem`}
-                              className="w-10 h-10 rounded-xl object-cover border border-white/25"
-                            />
-                            <div className="text-xs font-medium text-zinc-300">
-                              {modeCfg.label} · {modeCfg.themeName} Theme
-                            </div>
-                          </div>
-
-                          <h1 className="text-3xl sm:text-5xl font-bold font-display text-balance leading-tight">
-                            {heroItem ? heroItem.title || heroItem.name : 'XEROTV Liquid Cinema'}
-                          </h1>
-
-                          <p className="text-sm sm:text-base text-zinc-200 line-clamp-2 max-w-xl">
-                            {heroItem?.overview ||
-                              'Stream real TMDB movies and series via sandbox-ready VidZen and NxSha servers or download MP4s in the background to your offline vault.'}
-                          </p>
-
-                          <div className="pt-2 flex flex-wrap items-center gap-3">
-                            {heroItem && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  playClickFx();
-                                  setSelectedMedia(heroItem);
-                                }}
-                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-zinc-950 text-sm font-semibold hover:bg-zinc-200 transition-colors cursor-pointer"
-                              >
-                                <Play className="w-4 h-4 fill-current" />
-                                <span>Watch Now</span>
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playClickFx();
-                                setActiveSection('vault');
-                              }}
-                              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-zinc-950/75 border border-white/25 text-white text-sm font-semibold hover:bg-zinc-900/90 transition-colors cursor-pointer"
-                            >
-                              <HardDriveDownload className="w-4 h-4" />
-                              <span>Offline Vault ({offlineMovies.length})</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playClickFx();
-                                setActiveSection('docs');
-                              }}
-                              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-zinc-950/75 border border-white/25 text-zinc-100 text-xs font-semibold hover:bg-zinc-900/90 transition-colors cursor-pointer"
-                            >
-                              <span>Improving at 1.0</span>
-                            </button>
+                    <div className="relative z-10 w-full p-6 sm:p-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+                      <div className="max-w-2xl space-y-3">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={
+                              mode === 'christmas'
+                                ? '/src/assets/images/xerotv_christmas_emblem_1795185549050.jpg'
+                                : mode === 'kids'
+                                  ? '/src/assets/images/xerotv_kids_emblem_1795185548914.jpg'
+                                  : '/src/assets/images/xerotv_app_icon_1795185548315.jpg'
+                            }
+                            alt={`${modeCfg.label} emblem`}
+                            className="w-9 h-9 rounded-lg object-cover border border-white/25"
+                          />
+                          <div className="text-xs font-medium tracking-wide text-zinc-300">
+                            {modeCfg.label} · {modeCfg.themeName} Theme
+                            {heroItem?.vote_average ? ` · ★ ${heroItem.vote_average.toFixed(1)}` : ''}
                           </div>
                         </div>
+
+                        <h1 className="text-[clamp(2rem,4.5vw,3.5rem)] font-bold font-display tracking-tight leading-[1.05] text-balance">
+                          {heroItem ? heroItem.title || heroItem.name : 'XEROTV Cinema'}
+                        </h1>
+
+                        <p className="text-sm sm:text-base text-zinc-200 line-clamp-2 max-w-xl leading-relaxed">
+                          {heroItem?.overview ||
+                            'Stream movies, series, and vertical short dramas on fast servers or download MP4s for offline viewing.'}
+                        </p>
+
+                        <div className="pt-2 flex flex-wrap items-center gap-3">
+                          {heroItem && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playClickFx();
+                                setSelectedMedia(heroItem);
+                              }}
+                              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-zinc-950 text-sm font-semibold hover:bg-zinc-200 transition-colors cursor-pointer"
+                            >
+                              <Play className="w-4 h-4 fill-current" />
+                              <span>Watch Now</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playClickFx();
+                              setActiveSection('drama');
+                            }}
+                            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-zinc-950/75 border border-white/25 text-white text-sm font-semibold hover:bg-zinc-900 transition-colors cursor-pointer"
+                          >
+                            <Film className="w-4 h-4" />
+                            <span>Short Drama</span>
+                          </button>
+                        </div>
                       </div>
-                    </section>
-                  </TiltGlassCard>
+                    </div>
+                  </section>
 
                   {/* Networks & Studios Catalog Shelf */}
                   <NetworksCatalog
@@ -778,9 +803,125 @@ function XeroTvShell() {
                     onSelectMedia={setSelectedMedia}
                   />
 
+                  {/* Short Drama Vertical Spotlight Shelf */}
+                  {(loadingDramaSpotlight || shortDramaSpotlight.length > 0) && (
+                    <section
+                      className="space-y-4 border-t border-[var(--surface-border)] pt-10"
+                      aria-label="Short Drama Spotlight"
+                      data-testid="home-drama-spotlight"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-0.5">
+                          <h2 className="text-xl sm:text-2xl font-bold font-display flex items-center gap-2">
+                            <Clapperboard className="w-5 h-5 opacity-80" />
+                            <span>Short Drama Spotlight</span>
+                          </h2>
+                          <p className={`text-xs ${isKids ? 'text-slate-600' : 'text-zinc-400'}`}>
+                            {isKids
+                              ? 'PG-friendly vertical stories and animated mini-series'
+                              : 'Vertical 9:16 micro-series from ReelShort, StardustTV & Asian Mini-Series'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickFx();
+                            setInitialShortDrama(null);
+                            setActiveSection('drama');
+                          }}
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold hover:underline cursor-pointer shrink-0 ${
+                            isKids ? 'text-sky-700' : 'text-zinc-200 hover:text-white'
+                          }`}
+                        >
+                          <span>Browse All</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {loadingDramaSpotlight && shortDramaSpotlight.length === 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                          {Array.from({ length: 5 }).map((_, idx) => (
+                            <div
+                              key={idx}
+                              className={`aspect-[2/3] rounded-2xl animate-pulse ${
+                                isKids ? 'bg-sky-200/60' : 'bg-white/5'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                          {shortDramaSpotlight.map((drama) => (
+                            <button
+                              key={`spotlight-${drama.provider}-${drama.id}`}
+                              type="button"
+                              onClick={() => {
+                                playClickFx();
+                                setInitialShortDrama(drama);
+                                setActiveSection('drama');
+                              }}
+                              className={`group text-left flex flex-col rounded-2xl overflow-hidden border transition-all duration-200 cursor-pointer ${
+                                isKids
+                                  ? 'bg-white border-sky-200 hover:border-sky-400 shadow-sm'
+                                  : 'bg-[var(--surface-card)] border-[var(--surface-border)] hover:border-white/30'
+                              }`}
+                            >
+                              <div
+                                className={`relative aspect-[2/3] w-full overflow-hidden ${
+                                  isKids ? 'bg-sky-100' : 'bg-zinc-900'
+                                }`}
+                              >
+                                {drama.poster ? (
+                                  <img
+                                    src={drama.poster}
+                                    alt={drama.title}
+                                    loading="lazy"
+                                    decoding="async"
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center p-4 text-zinc-400">
+                                    <Film className="w-8 h-8 opacity-60" />
+                                  </div>
+                                )}
+                                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent flex items-end justify-end p-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span className="w-9 h-9 rounded-full bg-white text-zinc-950 flex items-center justify-center shadow-lg">
+                                    <Play className="w-4 h-4 fill-current ml-0.5" />
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="p-3.5 space-y-1">
+                                <h3
+                                  className={`text-sm font-semibold leading-snug line-clamp-1 ${
+                                    isKids ? 'text-slate-900' : 'text-white'
+                                  }`}
+                                >
+                                  {drama.title}
+                                </h3>
+                                <div
+                                  className={`text-xs tabular-nums truncate ${
+                                    isKids ? 'text-slate-500' : 'text-zinc-400'
+                                  }`}
+                                >
+                                  {drama.provider === 'miniseries'
+                                    ? 'Mini-Series'
+                                    : drama.provider === 'stardusttv'
+                                      ? 'StardustTV'
+                                      : 'ReelShort'}{' '}
+                                  · {drama.episodeCount} Eps
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
                   {/* mstream Synced Watchlist Shelf */}
                   {visibleWatchlist.length > 0 && (
-                    <section className="space-y-4" aria-label="My Watchlist">
+                    <section className="space-y-4 border-t border-[var(--surface-border)] pt-10" aria-label="My Watchlist">
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2">
                           <Bookmark className="w-5 h-5 opacity-80" />
@@ -817,7 +958,13 @@ function XeroTvShell() {
 
                   {/* Feed Error State */}
                   {feedError && (
-                    <div className={`rounded-2xl p-6 flex items-center justify-between gap-4 ${isKids ? 'bg-white border border-sky-200' : 'liquid-glass'}`}>
+                    <div
+                      className={`rounded-2xl p-6 flex items-center justify-between gap-4 border ${
+                        isKids
+                          ? 'bg-white border-sky-200'
+                          : 'bg-[var(--surface-card)] border-[var(--surface-border)]'
+                      }`}
+                    >
                       <p className="text-sm text-rose-500 font-medium">
                         TMDB Sync Notice: {feedError}
                       </p>
@@ -834,13 +981,18 @@ function XeroTvShell() {
 
                   {/* TMDB Catalog Sections */}
                   {loadingFeed ? (
-                    <div className="space-y-8">
+                    <div className="space-y-8 border-t border-[var(--surface-border)] pt-10">
                       {[1, 2].map((row) => (
                         <div key={row} className="space-y-3">
-                          <div className="h-6 w-48 rounded-lg bg-white/10 animate-pulse" />
+                          <div className={`h-6 w-48 rounded-lg animate-pulse ${isKids ? 'bg-sky-200/70' : 'bg-white/10'}`} />
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                             {Array.from({ length: 5 }).map((_, idx) => (
-                              <div key={idx} className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" />
+                              <div
+                                key={idx}
+                                className={`aspect-[2/3] rounded-2xl animate-pulse ${
+                                  isKids ? 'bg-sky-200/50' : 'bg-white/5'
+                                }`}
+                              />
                             ))}
                           </div>
                         </div>
@@ -848,7 +1000,7 @@ function XeroTvShell() {
                     </div>
                   ) : (
                     sections.map((sec) => (
-                      <section key={sec.id} className="space-y-4">
+                      <section key={sec.id} className="space-y-4 border-t border-[var(--surface-border)] pt-10">
                         <div className="flex items-baseline justify-between">
                           <h2 className="text-xl sm:text-2xl font-bold font-display">{sec.title}</h2>
                           <span className={`text-xs tabular-nums ${isKids ? 'text-slate-500' : 'text-zinc-400'}`}>
@@ -882,6 +1034,14 @@ function XeroTvShell() {
         onOpenDocs={() => {
           setSelectedMedia(null);
           setActiveSection('docs');
+        }}
+        onOpenApps={() => {
+          setSelectedMedia(null);
+          setActiveSection('apps');
+        }}
+        onOpenDrama={() => {
+          setSelectedMedia(null);
+          setActiveSection('drama');
         }}
       />
 

@@ -1,12 +1,13 @@
 export interface OfflineMovieRecord {
   key: string;
   tmdbId: number;
-  mediaType: 'movie' | 'tv';
+  mediaType: 'movie' | 'tv' | 'xerohots';
   title: string;
   overview: string;
   releaseDate: string;
   posterDataUrl: string | null;
   quality: 'standard' | 'hd';
+  sourceLabel?: string;
   sizeBytes: number;
   downloadedAtMs: number;
   watched?: boolean;
@@ -53,8 +54,11 @@ function openVaultDb(): Promise<IDBDatabase> {
 
 async function fetchPosterAsDataUrl(posterPath?: string | null): Promise<string | null> {
   if (!posterPath) return null;
+  const targetUrl = /^https?:\/\//i.test(posterPath)
+    ? posterPath
+    : `https://image.tmdb.org/t/p/w342${posterPath}`;
   try {
-    const res = await fetch(`https://image.tmdb.org/t/p/w342${posterPath}`, { mode: 'cors' });
+    const res = await fetch(targetUrl, { mode: 'cors' });
     if (!res.ok) return null;
     const blob = await res.blob();
     return await new Promise<string | null>((resolve) => {
@@ -182,6 +186,8 @@ export async function deleteWatchedOfflineMovies(): Promise<{
 export interface DownloadInfoPayload {
   ok: boolean;
   mirrorIndex: number;
+  streamToken?: string;
+  sourceLabel?: string;
   totalBytes: number;
   contentType: string;
   chunkBytes: number;
@@ -190,13 +196,22 @@ export interface DownloadInfoPayload {
 
 export async function probeDownloadInfo(params: {
   tmdbId: number;
+  mediaType?: 'movie' | 'tv' | 'xerohots';
   quality: 'standard' | 'hd';
   title: string;
+  directToken?: string;
   signal?: AbortSignal;
 }): Promise<DownloadInfoPayload> {
-  const infoUrl = `/api/download/info?tmdbId=${encodeURIComponent(
-    String(params.tmdbId),
-  )}&quality=${encodeURIComponent(params.quality)}&title=${encodeURIComponent(params.title)}`;
+  const qs = new URLSearchParams({
+    tmdbId: String(params.tmdbId),
+    mediaType: params.mediaType || 'movie',
+    quality: params.quality,
+    title: params.title,
+  });
+  if (params.directToken) {
+    qs.set('directToken', params.directToken);
+  }
+  const infoUrl = `/api/download/info?${qs.toString()}`;
   const res = await fetch(infoUrl, { signal: params.signal, cache: 'no-store' });
   const ct = (res.headers.get('content-type') || '').toLowerCase();
   if (!res.ok) {
@@ -252,20 +267,23 @@ async function fetchChunkWithRetry(
 
 export async function downloadMovieToVault(params: {
   tmdbId: number;
-  mediaType: 'movie' | 'tv';
+  mediaType: 'movie' | 'tv' | 'xerohots';
   title: string;
   overview: string;
   releaseDate: string;
   posterPath?: string | null;
   quality: 'standard' | 'hd';
+  directToken?: string;
   signal?: AbortSignal;
   onProgress?: (loadedBytes: number, totalBytes: number) => void;
 }): Promise<{ summary: OfflineMovieSummary; totalVaultBytes: number }> {
   const key = `${params.mediaType}:${params.tmdbId}`;
   const info = await probeDownloadInfo({
     tmdbId: params.tmdbId,
+    mediaType: params.mediaType,
     quality: params.quality,
     title: params.title,
+    directToken: params.directToken,
     signal: params.signal,
   });
 
@@ -278,11 +296,19 @@ export async function downloadMovieToVault(params: {
 
   for (let start = 0; start < totalBytes; start += chunkSize) {
     const end = Math.min(totalBytes - 1, start + chunkSize - 1);
-    const chunkUrl = `/api/download/stream?tmdbId=${encodeURIComponent(
-      String(params.tmdbId),
-    )}&quality=${encodeURIComponent(params.quality)}&title=${encodeURIComponent(
-      params.title,
-    )}&mirrorIndex=${encodeURIComponent(String(info.mirrorIndex))}&start=${start}&end=${end}`;
+    const chunkQs = new URLSearchParams({
+      tmdbId: String(params.tmdbId),
+      mediaType: params.mediaType,
+      quality: params.quality,
+      title: params.title,
+      mirrorIndex: String(info.mirrorIndex),
+      start: String(start),
+      end: String(end),
+    });
+    if (info.streamToken) {
+      chunkQs.set('streamToken', info.streamToken);
+    }
+    const chunkUrl = `/api/download/stream?${chunkQs.toString()}`;
 
     const chunkData = await fetchChunkWithRetry(chunkUrl, params.signal, 3);
     chunks.push(chunkData);
@@ -302,6 +328,7 @@ export async function downloadMovieToVault(params: {
     releaseDate: params.releaseDate,
     posterDataUrl,
     quality: params.quality,
+    sourceLabel: info.sourceLabel,
     sizeBytes: videoBlob.size,
     downloadedAtMs: Date.now(),
     videoBlob,

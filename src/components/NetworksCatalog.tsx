@@ -4,7 +4,6 @@ import { filterMediaForMode, type MediaItem, type ProfileMode } from '../utils/m
 import { cachedTmdbFetch, TMDB_CACHE_TTL } from '../utils/tmdbCache';
 import { playClickFx } from '../utils/soundFx';
 import { MediaCard } from './MediaCard';
-import { TiltGlassCard } from './TiltGlassCard';
 
 export interface StudioBrand {
   id: string;
@@ -222,14 +221,14 @@ export const NetworksCatalog: React.FC<NetworksCatalogProps> = ({
   return (
     <section className="space-y-4" aria-label="Networks and Studios Catalog">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Tv className="w-5 h-5 opacity-80" />
-          <h2 className="text-xl sm:text-2xl font-bold font-display">
-            Networks &amp; Studios
+        <div className="flex items-baseline gap-2.5 flex-wrap">
+          <h2 className="text-xl sm:text-2xl font-bold font-display flex items-center gap-2">
+            <Tv className="w-5 h-5 opacity-80" />
+            <span>Networks &amp; Studios</span>
           </h2>
           {isKids && (
-            <span className="px-2.5 py-0.5 rounded-lg bg-sky-100 border border-sky-200 text-sky-800 text-[11px] font-semibold">
-              Kids PG Studios Only
+            <span className="text-xs font-semibold text-sky-700">
+              · PG Studios Only
             </span>
           )}
         </div>
@@ -254,36 +253,35 @@ export const NetworksCatalog: React.FC<NetworksCatalogProps> = ({
         {visibleBrands.map((brand) => {
           const isSelected = brand.id === selectedStudioId;
           return (
-            <TiltGlassCard key={brand.id} intensity={6} className="rounded-2xl">
-              <button
-                type="button"
-                data-testid={`studio-btn-${brand.id}`}
-                onClick={() => {
-                  playClickFx();
-                  if (selectedStudioId === brand.id) {
-                    setSelectedStudioId(null);
-                  } else {
-                    setTypeFilter('all');
-                    setSelectedStudioId(brand.id);
-                  }
-                }}
-                className={`w-full text-left p-4 rounded-2xl bg-gradient-to-br ${brand.accentFrom} ${brand.accentTo} border transition-all cursor-pointer flex flex-col justify-between min-h-[96px] ${
-                  isSelected
-                    ? isKids
-                      ? 'border-sky-600 ring-2 ring-sky-500/60 shadow-lg'
-                      : 'border-white ring-2 ring-white/50 shadow-xl'
-                    : 'border-white/15 hover:border-white/35'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">{brand.mark}</div>
-                <div className="pt-2">
-                  <div className="text-xs font-bold text-white">{brand.name}</div>
-                  <div className="text-[11px] text-zinc-300/85">
-                    {isKids && brand.kidsSubtitle ? brand.kidsSubtitle : brand.subtitle}
-                  </div>
+            <button
+              key={brand.id}
+              type="button"
+              data-testid={`studio-btn-${brand.id}`}
+              onClick={() => {
+                playClickFx();
+                if (selectedStudioId === brand.id) {
+                  setSelectedStudioId(null);
+                } else {
+                  setTypeFilter('all');
+                  setSelectedStudioId(brand.id);
+                }
+              }}
+              className={`w-full text-left p-4 rounded-2xl bg-gradient-to-br ${brand.accentFrom} ${brand.accentTo} border transition-all cursor-pointer flex flex-col justify-between min-h-[96px] ${
+                isSelected
+                  ? isKids
+                    ? 'border-sky-600 ring-2 ring-sky-500/60 shadow-lg'
+                    : 'border-white ring-2 ring-white/50 shadow-xl'
+                  : 'border-white/15 hover:border-white/35'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">{brand.mark}</div>
+              <div className="pt-2">
+                <div className="text-xs font-bold text-white">{brand.name}</div>
+                <div className="text-[11px] text-zinc-300/85">
+                  {isKids && brand.kidsSubtitle ? brand.kidsSubtitle : brand.subtitle}
                 </div>
-              </button>
-            </TiltGlassCard>
+              </div>
+            </button>
           );
         })}
       </div>

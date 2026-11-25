@@ -173,15 +173,17 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
-      {/* Liquid Glass Mobile Splash & Hero */}
+      {/* Mobile Splash & App Distribution Hero */}
       <section
-        className={`rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-2 items-stretch ${
-          isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass-strong'
+        className={`rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-2 items-stretch border ${
+          isKids
+            ? 'bg-white border-sky-200 text-slate-900 shadow-sm'
+            : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
         }`}
       >
-        <div className="p-8 sm:p-10 flex flex-col justify-between gap-6">
+        <div className="p-6 sm:p-10 flex flex-col justify-between gap-6">
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3.5">
               <img
                 src="/src/assets/images/xerotv_app_icon_1795185548315.jpg"
                 alt="XEROTV Official App Icon"
@@ -198,13 +200,15 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
             </div>
 
             <p className={`text-sm leading-relaxed max-w-xl ${isKids ? 'text-slate-600' : 'text-zinc-300'}`}>
-              Install the real XEROTV app directly on Android or iPhone/iPad with a Liquid Glass
-              splash screen and home icon. Android <span className="font-semibold">XEROTV.apk</span> runs standalone
-              with the built-in TMDB engine and Offline Vault.
+              Install XEROTV directly on Android or iPhone/iPad with a cinema splash screen and home icon. Android <span className="font-semibold">XEROTV.apk</span> runs standalone with TMDB streaming, Short Drama, and Offline Vault built in.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-              <div className={`p-3.5 rounded-2xl space-y-1 ${isKids ? 'bg-sky-50' : 'bg-white/5 border border-white/10'}`}>
+            <div
+              className={`grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x border-t border-b py-3 text-xs ${
+                isKids ? 'divide-sky-200 border-sky-200' : 'divide-[var(--surface-border)] border-[var(--surface-border)]'
+              }`}
+            >
+              <div className="pb-3 sm:pb-0 sm:pr-4 space-y-1">
                 <div className="font-semibold flex items-center gap-1.5">
                   <Wifi className="w-4 h-4" />
                   <span>Standalone Android App</span>
@@ -213,7 +217,7 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
                   Full XEROTV app bundled inside the APK with real TMDB streaming and no 404/403 link errors.
                 </p>
               </div>
-              <div className={`p-3.5 rounded-2xl space-y-1 ${isKids ? 'bg-sky-50' : 'bg-white/5 border border-white/10'}`}>
+              <div className="pt-3 sm:pt-0 sm:pl-4 space-y-1">
                 <div className="font-semibold flex items-center gap-1.5">
                   <Smartphone className="w-4 h-4" />
                   <span>Watch Anywhere Offline</span>
@@ -226,11 +230,7 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
           </div>
 
           <div className="space-y-4">
-            <div
-              className={`rounded-2xl p-3 space-y-1.5 ${
-                isKids ? 'bg-sky-50 border border-sky-200' : 'bg-black/30 border border-white/10'
-              }`}
-            >
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <label
                   htmlFor="xerotv-app-target-url"
@@ -243,13 +243,22 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
                 </label>
                 {publicUrlLive !== null && (
                   <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                    className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
                       publicUrlLive
-                        ? 'bg-emerald-500/15 text-emerald-400'
-                        : 'bg-white/10 text-zinc-400'
+                        ? isKids
+                          ? 'text-emerald-700'
+                          : 'text-emerald-400'
+                        : isKids
+                          ? 'text-slate-500'
+                          : 'text-zinc-400'
                     }`}
                   >
-                    {publicUrlLive ? 'Live' : 'Standalone Mode'}
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        publicUrlLive ? 'bg-emerald-400' : 'bg-zinc-400'
+                      }`}
+                    />
+                    <span>{publicUrlLive ? 'Live' : 'Standalone Mode'}</span>
                   </span>
                 )}
               </div>
@@ -259,10 +268,10 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
                 value={customDeployUrl}
                 onChange={(e) => setCustomDeployUrl(e.target.value)}
                 placeholder="https://xerotv.vercel.app (override only if self-hosting elsewhere)"
-                className={`w-full rounded-xl px-3 py-2 text-xs font-mono outline-none border ${
+                className={`w-full rounded-xl px-3 py-2.5 text-xs font-mono outline-none border ${
                   isKids
-                    ? 'bg-white border-sky-200 text-slate-900 focus:border-sky-400'
-                    : 'bg-zinc-950/80 border-white/15 text-zinc-100 focus:border-white/40 placeholder:text-zinc-500'
+                    ? 'bg-sky-50 border-sky-200 text-slate-900 focus:border-sky-400'
+                    : 'bg-black/45 border-white/15 text-zinc-100 focus:border-white/40 placeholder:text-zinc-500'
                 }`}
               />
             </div>
@@ -350,8 +359,8 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
             )}
 
             <div
-              className={`rounded-2xl p-3.5 text-[11px] leading-relaxed grid grid-cols-1 sm:grid-cols-2 gap-3 ${
-                isKids ? 'bg-sky-50 text-slate-700' : 'bg-white/5 border border-white/10 text-zinc-300'
+              className={`pt-3 border-t text-[11px] leading-relaxed grid grid-cols-1 sm:grid-cols-2 gap-4 ${
+                isKids ? 'border-sky-200 text-slate-700' : 'border-[var(--surface-border)] text-zinc-300'
               }`}
             >
               <div className="space-y-1">
@@ -378,32 +387,25 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
           </div>
         </div>
 
-        {/* Liquid Glass Mobile Preview Card */}
-        <div className="relative min-h-[320px] lg:h-full overflow-hidden bg-zinc-950">
+        {/* Clean Backdrop Mobile Preview */}
+        <div className="relative min-h-[300px] lg:h-full overflow-hidden bg-zinc-950">
           <img
             src="/src/assets/images/xerotv_splash_backdrop_1795185549127.jpg"
-            alt="XEROTV Liquid Glass Cinema Backdrop"
-            className="w-full h-full object-cover opacity-80"
+            alt="XEROTV Mobile Cinema Backdrop"
+            className="w-full h-full object-cover opacity-85"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent flex items-end p-8">
-            <div className="w-full max-w-xs mx-auto liquid-glass-strong rounded-3xl p-5 text-white space-y-3 border border-white/20">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/src/assets/images/xerotv_app_icon_1795185548315.jpg"
-                  alt="XEROTV Mobile Splash Icon"
-                  className="w-11 h-11 rounded-2xl object-cover"
-                />
-                <div>
-                  <div className="text-sm font-bold font-display">XEROTV Mobile</div>
-                  <div className="text-[11px] text-zinc-400">Liquid Glass Splash Experience</div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent flex items-end p-8 sm:p-10">
+            <div className="flex items-center gap-4 text-white">
+              <img
+                src="/src/assets/images/xerotv_app_icon_1795185548315.jpg"
+                alt="XEROTV Mobile Splash Icon"
+                className="w-12 h-12 rounded-2xl object-cover border border-white/25 shadow-lg shrink-0"
+              />
+              <div className="space-y-1">
+                <div className="text-base font-bold font-display">XEROTV Mobile</div>
+                <div className="text-xs text-zinc-300">
+                  Android APK · iOS WebApp · Short Drama &amp; Offline Vault
                 </div>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-white/15 overflow-hidden">
-                <div className="h-full w-2/3 bg-white rounded-full" />
-              </div>
-              <div className="flex justify-between text-[11px] text-zinc-300">
-                <span>Android APK + iOS App</span>
-                <span>Offline Vault Ready</span>
               </div>
             </div>
           </div>
@@ -417,7 +419,7 @@ export const GetAppsView: React.FC<GetAppsViewProps> = ({ mode, onOpenVault }) =
           aria-labelledby="install-guide-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
         >
-          <div className="w-full max-w-md liquid-glass-strong rounded-3xl p-6 text-white space-y-4">
+          <div className="w-full max-w-md liquid-glass-strong rounded-2xl p-6 text-white space-y-4">
             <div className="flex items-center gap-2.5">
               <Share2 className="w-5 h-5" />
               <h2 id="install-guide-title" className="text-lg font-bold font-display">

@@ -5,7 +5,7 @@ import { playDownloadDoneFx, playErrorFx } from '../utils/soundFx';
 export interface BackgroundDownloadJob {
   key: string;
   tmdbId: number;
-  mediaType: 'movie' | 'tv';
+  mediaType: 'movie' | 'tv' | 'xerohots';
   title: string;
   quality: 'standard' | 'hd';
   loadedBytes: number;
@@ -30,12 +30,13 @@ interface DownloadContextValue {
   unreadCount: number;
   startBackgroundDownload: (params: {
     tmdbId: number;
-    mediaType: 'movie' | 'tv';
+    mediaType: 'movie' | 'tv' | 'xerohots';
     title: string;
     overview: string;
     releaseDate: string;
     posterPath?: string | null;
     quality: 'standard' | 'hd';
+    directToken?: string;
     estimatedBytes: number;
     onVaultUpdated: (newUsedBytes: number) => void;
   }) => Promise<void>;
@@ -50,9 +51,9 @@ const DownloadContext = createContext<DownloadContextValue | null>(null);
 const INITIAL_UPDATE_NOTIFICATION: AppNotificationItem = {
   id: 'update-v1-0',
   kind: 'update',
-  title: 'XEROTV 1.0 Update — Improving at 1.0',
+  title: 'XEROTV 1.0 Update — Short Drama & Offline Cinema',
   description:
-    'Background downloads, 3D Liquid Glass, Networks catalog, WebApp shortcuts, and promo VER-1-0XEROTV (+20 days / +5GB) are live.',
+    'Vertical Short Drama theatre, background offline downloads, Networks & Studios catalog, WebApp shortcuts, and promo VER-1-0XEROTV (+20 days / +5GB) are live.',
   timestampMs: Date.now(),
   read: false,
   actionSection: 'docs',
@@ -110,12 +111,13 @@ export const DownloadProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const startBackgroundDownload = useCallback(
     async (params: {
       tmdbId: number;
-      mediaType: 'movie' | 'tv';
+      mediaType: 'movie' | 'tv' | 'xerohots';
       title: string;
       overview: string;
       releaseDate: string;
       posterPath?: string | null;
       quality: 'standard' | 'hd';
+      directToken?: string;
       estimatedBytes: number;
       onVaultUpdated: (newUsedBytes: number) => void;
     }) => {
@@ -150,6 +152,7 @@ export const DownloadProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           releaseDate: params.releaseDate,
           posterPath: params.posterPath,
           quality: params.quality,
+          directToken: params.directToken,
           signal: controller.signal,
           onProgress: (loaded, total) => {
             setJobs((prev) => {

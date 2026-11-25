@@ -24,7 +24,7 @@ export default defineConfig(() => {
           name: 'XEROTV',
           short_name: 'XEROTV',
           description:
-            'Liquid Glass movie and series streaming platform developed by XIAN IN PRODUCTION with offline downloads and real TMDB sync.',
+            'XEROTV cinema, series, and vertical Short Drama platform developed by XIAN IN PRODUCTION with offline downloads and real TMDB sync.',
           theme_color: '#0a0a0c',
           background_color: '#0a0a0c',
           display: 'standalone',
@@ -43,6 +43,13 @@ export default defineConfig(() => {
               short_name: 'Movies',
               description: 'Browse streaming movies on XEROTV',
               url: '/?section=movies',
+              icons: [{ src: '/pwa-192x192.png', sizes: '192x192' }],
+            },
+            {
+              name: 'Short Drama',
+              short_name: 'Drama',
+              description: 'Watch vertical micro-series and dramas on XEROTV',
+              url: '/?section=drama',
               icons: [{ src: '/pwa-192x192.png', sizes: '192x192' }],
             },
             {
@@ -89,15 +96,7 @@ export default defineConfig(() => {
           navigateFallbackDenylist: [/^\/api\//, /^\/apps\//, /^\/media\//],
           runtimeCaching: [
             {
-              urlPattern: ({ url }) =>
-                url.pathname.startsWith('/api/auth/') ||
-                url.pathname.startsWith('/api/download/') ||
-                url.pathname.startsWith('/api/admin/') ||
-                url.pathname.startsWith('/api/apps/') ||
-                url.pathname.startsWith('/api/speedtest/') ||
-                url.pathname.startsWith('/api/security/') ||
-                url.pathname.startsWith('/api/account/') ||
-                url.pathname.startsWith('/api/platform/'),
+              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
               handler: 'NetworkOnly',
             },
             {

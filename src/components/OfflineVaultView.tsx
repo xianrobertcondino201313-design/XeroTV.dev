@@ -20,7 +20,6 @@ import {
 import { formatBytes, type UserSubscriptionState } from '../utils/subscription';
 import type { ProfileMode } from '../utils/modes';
 import { playClickFx, playUnlockFx } from '../utils/soundFx';
-import { TiltGlassCard } from './TiltGlassCard';
 
 interface OfflineVaultViewProps {
   items: OfflineMovieSummary[];
@@ -140,8 +139,8 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
 
       {/* Storage Telemetry & Cleanup Card */}
       <div
-        className={`rounded-3xl p-6 space-y-4 ${
-          isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass-strong'
+        className={`rounded-2xl p-6 space-y-4 border ${
+          isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -203,8 +202,8 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
       {/* Offline HTML5 Video Player */}
       {playing && (
         <div
-          className={`rounded-3xl overflow-hidden p-4 space-y-3 ${
-            isKids ? 'bg-white border border-sky-200 text-slate-900 shadow-sm' : 'liquid-glass-strong'
+          className={`rounded-2xl overflow-hidden p-4 space-y-3 border ${
+            isKids ? 'bg-white border-sky-200 text-slate-900 shadow-sm' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
           }`}
         >
           <div className="flex items-center justify-between">
@@ -231,6 +230,7 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
           </div>
           <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black">
             <video
+              key={playing.summary.key}
               src={playing.url}
               controls
               autoPlay
@@ -245,8 +245,8 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
       {/* Downloaded Movies Grid */}
       {items.length === 0 ? (
         <div
-          className={`rounded-3xl p-12 text-center space-y-3 ${
-            isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
+          className={`rounded-2xl p-12 text-center space-y-3 border ${
+            isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
           }`}
         >
           <Film className="w-10 h-10 mx-auto opacity-50" />
@@ -259,12 +259,12 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {items.map((rec) => (
-            <TiltGlassCard key={rec.key} intensity={5} className="rounded-2xl">
-              <div
-                className={`rounded-2xl overflow-hidden flex gap-4 p-4 h-full ${
-                  isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
-                }`}
-              >
+            <div
+              key={rec.key}
+              className={`rounded-2xl overflow-hidden flex gap-4 p-4 h-full border ${
+                isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
+              }`}
+            >
                 <div className="w-24 aspect-[2/3] rounded-xl overflow-hidden bg-zinc-900 shrink-0">
                   {rec.posterDataUrl ? (
                     <img
@@ -295,8 +295,14 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                       )}
                     </div>
                     <div className={`text-xs tabular-nums mt-0.5 ${isKids ? 'text-slate-500' : 'text-zinc-400'}`}>
+                      {rec.mediaType === 'xerohots' ? 'XEROHOTS' : rec.mediaType === 'tv' ? 'SERIES' : 'MOVIE'} ·{' '}
                       {rec.quality.toUpperCase()} · {formatBytes(rec.sizeBytes)}
                     </div>
+                    {rec.sourceLabel && (
+                      <div className={`text-[10px] truncate mt-0.5 ${isKids ? 'text-slate-400' : 'text-zinc-500'}`}>
+                        Source: {rec.sourceLabel}
+                      </div>
+                    )}
                     <p className={`text-xs line-clamp-2 mt-2 ${isKids ? 'text-slate-600' : 'text-zinc-400'}`}>
                       {rec.overview}
                     </p>
@@ -355,12 +361,11 @@ export const OfflineVaultView: React.FC<OfflineVaultViewProps> = ({
                           : 'border-white/15 text-rose-400 hover:bg-rose-500/10'
                       }`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               </div>
-            </TiltGlassCard>
           ))}
         </div>
       )}

@@ -214,7 +214,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       aria-labelledby="account-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md overflow-y-auto"
     >
-      <div className="w-full max-w-2xl liquid-glass-strong rounded-3xl p-6 sm:p-8 text-white space-y-6 my-auto max-h-[90vh] overflow-y-auto border border-white/20">
+      <div className="w-full max-w-2xl liquid-glass-strong rounded-2xl p-6 sm:p-8 text-white space-y-6 my-auto max-h-[90vh] overflow-y-auto border border-white/15">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="account-modal-title" className="text-2xl font-bold font-display">
@@ -484,7 +484,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   />
                 </div>
               ) : (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
+                <div className="inline-flex items-center gap-1.5 text-emerald-400 text-xs font-medium">
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Human Check Verified for Session</span>
                 </div>
@@ -531,8 +531,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold truncate">{user.displayName || 'XEROTV Member'}</span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/10 text-[10px] uppercase font-mono text-zinc-300">
-                    XEROTV ID
+                  <span className="text-[11px] uppercase font-mono text-zinc-400">
+                    · XEROTV ID
                   </span>
                 </div>
                 <div className="text-xs text-zinc-400 truncate">{user.email}</div>

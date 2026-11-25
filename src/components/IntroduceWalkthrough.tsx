@@ -11,7 +11,6 @@ import {
   X,
 } from 'lucide-react';
 import { playClickFx, playTypingFx, playUnlockFx } from '../utils/soundFx';
-import { TiltGlassCard } from './TiltGlassCard';
 
 interface IntroduceWalkthroughProps {
   open: boolean;
@@ -22,11 +21,11 @@ interface IntroduceWalkthroughProps {
 const SLIDES = [
   {
     badge: 'WELCOME TO XEROTV · XIAN IN PRODUCTION',
-    title: 'Cinema Inside 3D Liquid Glass',
-    body: 'Move your cursor across any card or control to feel hardware-accelerated Liquid Glass depth, specular light slashes, and tactile Web Audio feedback.',
+    title: 'Cinema & Short Drama, Reimagined',
+    body: 'Stream worldwide TMDB movies, series, and vertical 9:16 short dramas across crisp dark and Kids PG themes with instant server switching.',
     highlights: [
       'Real-time TMDB movie & series catalog synchronization',
-      'Live speed telemetry, precision clock & installable WebApp shortcuts',
+      'Vertical Short Drama theatre with captions & auto-next',
       'Built for Desktop, Tablet, iOS, and native Android APK',
     ],
     Icon: Sparkles,
@@ -108,8 +107,7 @@ export const IntroduceWalkthrough: React.FC<IntroduceWalkthroughProps> = ({
       aria-labelledby="introduce-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl overflow-y-auto"
     >
-      <TiltGlassCard intensity={5} className="w-full max-w-3xl rounded-3xl my-auto">
-        <div className="liquid-glass-strong rounded-3xl p-6 sm:p-8 text-white space-y-6 border border-white/20">
+      <div className="w-full max-w-3xl liquid-glass-strong rounded-2xl p-6 sm:p-8 text-white space-y-6 my-auto border border-white/15">
           {/* Header Row */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -157,12 +155,9 @@ export const IntroduceWalkthrough: React.FC<IntroduceWalkthroughProps> = ({
 
             <p className="text-sm text-zinc-300 leading-relaxed">{slide.body}</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-white/10 rounded-2xl bg-white/[0.03] border border-white/10">
               {slide.highlights.map((h) => (
-                <div
-                  key={h}
-                  className="rounded-2xl bg-white/5 border border-white/10 p-3 text-xs text-zinc-200 leading-relaxed"
-                >
+                <div key={h} className="p-3.5 text-xs text-zinc-200 leading-relaxed">
                   {h}
                 </div>
               ))}
@@ -249,8 +244,7 @@ export const IntroduceWalkthrough: React.FC<IntroduceWalkthroughProps> = ({
               )}
             </div>
           </div>
-        </div>
-      </TiltGlassCard>
+      </div>
     </div>
   );
 };

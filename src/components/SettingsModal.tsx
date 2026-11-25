@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Globe, Monitor, Server, Settings, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import { Clock, Globe, Monitor, Server, Settings, Volume2, VolumeX, X } from 'lucide-react';
 import { STREAMING_SERVERS } from '../utils/servers';
 import {
   formatClockDisplay,
@@ -50,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       aria-labelledby="settings-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md overflow-y-auto"
     >
-      <div className="w-full max-w-lg liquid-glass-strong rounded-3xl p-6 sm:p-7 text-white space-y-5 my-auto max-h-[90vh] overflow-y-auto border border-white/20">
+      <div className="w-full max-w-lg liquid-glass-strong rounded-2xl p-6 sm:p-7 text-white space-y-5 my-auto max-h-[90vh] overflow-y-auto border border-white/15">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <Settings className="w-5 h-5" />
@@ -59,7 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 XEROTV Settings
               </h2>
               <p className="text-xs text-zinc-400">
-                Working preferences saved locally on this device.
+                Preferences saved locally on this device.
               </p>
             </div>
           </div>
@@ -74,9 +74,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="divide-y divide-white/10 rounded-2xl bg-white/[0.03] border border-white/10">
           {/* Audio SFX Toggle */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 flex items-center justify-between gap-4">
+          <div className="p-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               {settings.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-zinc-400" />}
               <div>
@@ -97,30 +97,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* 3D Liquid Glass Tilt Toggle */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Sparkles className="w-4 h-4" />
-              <div>
-                <div className="text-sm font-semibold">3D Liquid Glass Cursor Motion</div>
-                <div className="text-xs text-zinc-400">Pointer-triggered tilt &amp; specular slash highlights</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.motion3dEnabled}
-              onClick={() => updatePatch({ motion3dEnabled: !settings.motion3dEnabled })}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                settings.motion3dEnabled ? 'bg-white text-zinc-950' : 'bg-white/10 text-zinc-400'
-              }`}
-            >
-              {settings.motion3dEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
           {/* Date, Time & Timezone Configuration */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-3">
+          <div className="p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold flex items-center gap-2">
                 <Clock className="w-4 h-4" />
@@ -173,7 +151,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Default Streaming Server */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
+          <div className="p-4 space-y-2">
             <label htmlFor="settings-default-server" className="text-sm font-semibold flex items-center gap-2">
               <Server className="w-4 h-4" />
               <span>Default Streaming Server</span>
@@ -193,7 +171,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Default Offline Quality */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-4 space-y-2">
+          <div className="p-4 space-y-2">
             <div className="text-sm font-semibold flex items-center gap-2">
               <Monitor className="w-4 h-4" />
               <span>Default Offline Download Quality</span>
@@ -223,32 +201,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </div>
+        </div>
 
-          {/* Quick Actions */}
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                playUnlockFx();
-                onClose();
-                onOpenIntroduce();
-              }}
-              className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold cursor-pointer"
-            >
-              Replay Introduce Tour
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playClickFx();
-                onClose();
-                onOpenAccount();
-              }}
-              className="py-2.5 px-3 rounded-xl bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-semibold cursor-pointer"
-            >
-              Manage Account &amp; Codes
-            </button>
-          </div>
+        {/* Quick Actions */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              playUnlockFx();
+              onClose();
+              onOpenIntroduce();
+            }}
+            className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold cursor-pointer"
+          >
+            Replay Introduce Tour
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              playClickFx();
+              onClose();
+              onOpenAccount();
+            }}
+            className="py-2.5 px-3 rounded-xl bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-semibold cursor-pointer"
+          >
+            Manage Account &amp; Codes
+          </button>
         </div>
       </div>
     </div>

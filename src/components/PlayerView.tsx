@@ -300,10 +300,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         <button
           type="button"
           onClick={onBack}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer min-h-[44px] ${
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer min-h-[44px] border ${
             isKids
-              ? 'bg-white border border-sky-200 text-slate-800 hover:bg-sky-50'
-              : 'liquid-glass text-white hover:bg-white/10'
+              ? 'bg-white border-sky-200 text-slate-800 hover:bg-sky-50'
+              : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white hover:bg-white/10'
           }`}
         >
           <ArrowLeft className="w-4 h-4" />
@@ -325,7 +325,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                   : 'bg-white border-white text-zinc-950'
                 : isKids
                   ? 'bg-white border-sky-200 text-slate-800 hover:bg-sky-50'
-                  : 'liquid-glass text-white hover:bg-white/10'
+                  : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white hover:bg-white/10'
             }`}
           >
             {inWatchlist ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
@@ -340,7 +340,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
       {/* Video Player Surface */}
       <div className="space-y-4">
-        <div className="relative w-full aspect-video rounded-3xl overflow-hidden bg-zinc-950 border border-white/15 shadow-2xl">
+        <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-zinc-950 border border-[var(--surface-border)] shadow-2xl">
           {!offlinePlaybackUrl && (details?.backdrop_path || item.backdrop_path) && (
             <img
               src={`https://image.tmdb.org/t/p/w1280${details?.backdrop_path || item.backdrop_path}`}
@@ -385,8 +385,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
         {/* Sandbox Streaming Server Switcher (mstream Multi-Server + Pop-Out Ad Shield) */}
         <div
-          className={`rounded-2xl p-4 flex flex-col gap-3 ${
-            isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
+          className={`rounded-2xl p-4 flex flex-col gap-3 border ${
+            isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -394,7 +394,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               <ShieldCheck className="w-4 h-4" />
               <span>Streaming Servers (mstream 10-Provider Sync)</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               {!offlinePlaybackUrl && (
                 <button
                   type="button"
@@ -413,14 +413,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               {isStrictNoPopups ? (
                 <div
                   data-testid="vidzen-adblock-shield"
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border ${
-                    isKids
-                      ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                      : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                  className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                    isKids ? 'text-emerald-700' : 'text-emerald-400'
                   }`}
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Pop-Out Ads Blocked (Locked)</span>
+                  <span>Pop-Out Ads Blocked</span>
                 </div>
               ) : (
                 <button
@@ -503,8 +501,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         {/* TV Season & Episode Picker */}
         {mediaType === 'tv' && seasons.length > 0 && (
           <div
-            className={`rounded-2xl p-4 space-y-3 ${
-              isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
+            className={`rounded-2xl p-4 space-y-3 border ${
+              isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
             }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -586,8 +584,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       {/* Details + Real Offline Download Vault Box */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div
-          className={`lg:col-span-2 rounded-3xl p-6 space-y-4 ${
-            isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass'
+          className={`lg:col-span-2 rounded-2xl p-6 space-y-4 border ${
+            isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
           }`}
         >
           <div className="space-y-1">
@@ -648,8 +646,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
         {/* Real Offline Download Panel */}
         <div
-          className={`rounded-3xl p-6 space-y-4 flex flex-col justify-between ${
-            isKids ? 'bg-white border border-sky-200 text-slate-900' : 'liquid-glass-strong'
+          className={`rounded-2xl p-6 space-y-4 flex flex-col justify-between border ${
+            isKids ? 'bg-white border-sky-200 text-slate-900' : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white'
           }`}
         >
           <div className="space-y-3">

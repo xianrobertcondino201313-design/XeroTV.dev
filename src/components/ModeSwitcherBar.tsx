@@ -32,25 +32,27 @@ export const ModeSwitcherBar: React.FC<ModeSwitcherBarProps> = ({
   const renderIcon = (m: ProfileMode) => {
     switch (m) {
       case 'kids':
-        return <Baby className="w-4 h-4 shrink-0" />;
+        return <Baby className="w-3.5 h-3.5 shrink-0" />;
       case 'adult':
-        return <Flame className="w-4 h-4 shrink-0" />;
+        return <Flame className="w-3.5 h-3.5 shrink-0" />;
       case 'christmas':
-        return <Snowflake className="w-4 h-4 shrink-0" />;
+        return <Snowflake className="w-3.5 h-3.5 shrink-0" />;
       default:
-        return <Sparkles className="w-4 h-4 shrink-0" />;
+        return <Sparkles className="w-3.5 h-3.5 shrink-0" />;
     }
   };
 
   return (
     <section
       aria-label="Workspace Toolbar"
-      className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4"
+      className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-2 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5"
     >
       {/* Profile Modes */}
       <div
-        className={`flex items-center gap-1.5 p-1.5 rounded-xl overflow-x-auto no-scrollbar ${
-          isKids ? 'bg-sky-100/90 border border-sky-200' : 'liquid-glass'
+        className={`flex items-center gap-1 p-1 rounded-xl border overflow-x-auto no-scrollbar ${
+          isKids
+            ? 'bg-white border-sky-200'
+            : 'bg-[var(--surface-card)] border-[var(--surface-border)]'
         }`}
         role="tablist"
         aria-label="Profile Modes"
@@ -74,31 +76,28 @@ export const ModeSwitcherBar: React.FC<ModeSwitcherBarProps> = ({
                 playClickFx();
                 onRequestModeChange(m);
               }}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer min-h-[40px] ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[38px] ${
                 active
                   ? m === 'kids'
-                    ? 'bg-sky-600 text-white shadow-sm'
+                    ? 'bg-sky-600 text-white'
                     : m === 'adult'
-                      ? 'bg-rose-600 text-white shadow-sm'
+                      ? 'bg-rose-600 text-white'
                       : m === 'christmas'
-                        ? 'bg-red-600 text-white shadow-sm'
-                        : 'bg-white text-zinc-950 shadow-sm'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-white text-zinc-950'
                   : isChristmasLocked
                     ? isKids
-                      ? 'text-slate-500 bg-white/40 hover:bg-white/70'
-                      : 'text-zinc-400 hover:text-white hover:bg-white/10'
+                      ? 'text-slate-400 hover:text-slate-600'
+                      : 'text-zinc-500 hover:text-zinc-300'
                     : isKids
-                      ? 'text-slate-700 hover:bg-white/70'
-                      : 'text-zinc-300 hover:text-white hover:bg-white/10'
+                      ? 'text-slate-700 hover:bg-sky-50'
+                      : 'text-zinc-300 hover:text-white hover:bg-white/5'
               }`}
             >
               {renderIcon(m)}
               <span>{cfg.label}</span>
               {(m === 'kids' || m === 'adult' || isChristmasLocked) && (
-                <Lock className="w-3 h-3 opacity-75 shrink-0" aria-hidden="true" />
-              )}
-              {isChristmasLocked && (
-                <span className="text-[10px] opacity-65 font-normal">Dec 25</span>
+                <Lock className="w-3 h-3 opacity-70 shrink-0" aria-hidden="true" />
               )}
             </button>
           );
@@ -121,10 +120,10 @@ export const ModeSwitcherBar: React.FC<ModeSwitcherBarProps> = ({
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={`Search ${MODE_CONFIGS[mode].shortLabel} catalog...`}
-          className={`w-full pl-10 pr-9 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 transition-colors ${
+          className={`w-full pl-10 pr-9 py-2.5 rounded-xl text-sm border focus:outline-none focus:ring-2 transition-colors ${
             isKids
-              ? 'bg-white border border-sky-200 text-slate-900 placeholder:text-slate-400 focus:ring-sky-500'
-              : 'liquid-glass text-white placeholder:text-zinc-400 focus:ring-white/40'
+              ? 'bg-white border-sky-200 text-slate-900 placeholder:text-slate-400 focus:ring-sky-500'
+              : 'bg-[var(--surface-card)] border-[var(--surface-border)] text-white placeholder:text-zinc-500 focus:ring-white/40'
           }`}
         />
         {searchQuery && (

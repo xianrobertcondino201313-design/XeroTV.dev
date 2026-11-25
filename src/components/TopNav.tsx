@@ -3,7 +3,15 @@ import { Bell, Settings } from 'lucide-react';
 import { MODE_CONFIGS, type ProfileMode } from '../utils/modes';
 import { playClickFx } from '../utils/soundFx';
 
-export type AppSection = 'home' | 'movies' | 'series' | 'hots' | 'vault' | 'docs' | 'apps';
+export type AppSection =
+  | 'home'
+  | 'movies'
+  | 'series'
+  | 'drama'
+  | 'hots'
+  | 'vault'
+  | 'docs'
+  | 'apps';
 
 interface TopNavProps {
   activeSection: AppSection;
@@ -31,26 +39,32 @@ export const TopNav: React.FC<TopNavProps> = ({
   const modeConfig = MODE_CONFIGS[mode];
   const isKids = mode === 'kids';
 
-  const allNavItems: { id: AppSection; label: string }[] = [
-    { id: 'home', label: 'Home' },
-    { id: 'movies', label: 'Movies' },
-    { id: 'series', label: 'Series' },
-    { id: 'hots', label: 'XeroHots' },
-    { id: 'vault', label: 'Offline Vault' },
-    { id: 'docs', label: 'Docs 1.0' },
-    { id: 'apps', label: 'Get Apps' },
-  ];
-  const navItems = isKids ? allNavItems.filter((item) => item.id !== 'hots') : allNavItems;
+  const baseNavItems: { id: AppSection; label: string }[] = isKids
+    ? [
+        { id: 'home', label: 'Home' },
+        { id: 'movies', label: 'Movies' },
+        { id: 'series', label: 'Series' },
+        { id: 'drama', label: 'Short Drama' },
+        { id: 'vault', label: 'Vault' },
+      ]
+    : [
+        { id: 'home', label: 'Home' },
+        { id: 'movies', label: 'Movies' },
+        { id: 'series', label: 'Series' },
+        { id: 'drama', label: 'Short Drama' },
+        { id: 'hots', label: 'XeroHots' },
+        { id: 'vault', label: 'Vault' },
+      ];
 
   return (
     <header
       className={`sticky top-0 z-40 border-b transition-colors ${
         isKids
-          ? 'bg-white/90 border-sky-200 text-slate-900 backdrop-blur-xl'
-          : 'liquid-glass-strong border-white/10'
+          ? 'bg-white/95 border-sky-200 text-slate-900 backdrop-blur-xl'
+          : 'liquid-glass-strong border-[var(--surface-border)]'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4 sm:gap-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand Title */}
         <button
           type="button"
@@ -69,13 +83,17 @@ export const TopNav: React.FC<TopNavProps> = ({
         </button>
 
         {/* Zone 2: Concise Single-Line Nav Links */}
-        <nav className="hidden md:flex items-center gap-5 lg:gap-6 text-sm font-medium" aria-label="Primary">
-          {navItems.map((item) => {
+        <nav
+          className="hidden md:flex items-center gap-5 lg:gap-7 text-sm font-medium"
+          aria-label="Primary"
+        >
+          {baseNavItems.map((item) => {
             const active = activeSection === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
+                data-testid={`nav-${item.id}`}
                 onClick={() => {
                   playClickFx();
                   onSelectSection(item.id);
@@ -100,8 +118,8 @@ export const TopNav: React.FC<TopNavProps> = ({
           })}
         </nav>
 
-        {/* Zone 3: Notifications, Settings & Primary Account Action */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Zone 3: Alerts, Settings & Single Primary Account CTA */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -109,13 +127,13 @@ export const TopNav: React.FC<TopNavProps> = ({
               onOpenNotifications();
             }}
             aria-label="Open notifications"
-            className={`relative p-2.5 rounded-xl transition-colors cursor-pointer ${
+            className={`relative min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl transition-colors cursor-pointer ${
               isKids ? 'text-slate-700 hover:bg-sky-100' : 'text-zinc-300 hover:text-white hover:bg-white/10'
             }`}
           >
             <Bell className="w-4 h-4" />
             {unreadNotifications > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+              <span className="absolute top-1.5 right-1.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
                 {unreadNotifications > 9 ? '9+' : unreadNotifications}
               </span>
             )}
@@ -128,7 +146,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               onOpenSettings();
             }}
             aria-label="Open settings"
-            className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
+            className={`min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl transition-colors cursor-pointer ${
               isKids ? 'text-slate-700 hover:bg-sky-100' : 'text-zinc-300 hover:text-white hover:bg-white/10'
             }`}
           >
@@ -141,7 +159,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               playClickFx();
               onOpenAccount();
             }}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[40px] ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer min-h-[40px] ${
               isKids
                 ? 'bg-sky-600 text-white hover:bg-sky-700'
                 : 'bg-white text-zinc-950 hover:bg-zinc-200'
